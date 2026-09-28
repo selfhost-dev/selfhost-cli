@@ -2,14 +2,15 @@
 //!
 //! Slice 0 registers the complete documented surface as real clap subcommands and
 //! stages the behaviour: commands whose implementation a later slice owns answer with
-//! `not implemented yet: <full command path>`. Only `tui`, `help`, `tree` and
-//! `completion` do work here.
+//! `not implemented yet: <full command path>`. `auth` and `profile` are real, as are
+//! `tui`, `help`, `tree` and `completion`.
 //!
 //! * adding a command: one line in the group's [`stub_group!`] call;
 //! * adding behaviour: a real arm in the group's dispatch, or a new group module.
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
+use crate::config::{Profile, validate_endpoint};
 use crate::output::Format;
 
 pub mod alert;
@@ -219,6 +220,20 @@ pub struct GlobalArgs {
         help_heading = "Global options"
     )]
     pub version: Option<bool>,
+}
+
+/// The base URL this run should talk to: an explicit `--base-url` /
+/// `SELFHOSTDEV_BASE_URL` (an empty value counts as unset) over the profile's
+/// own. Whichever wins is validated before an [`crate::api::ApiClient`] is
+/// built, so a bad override fails closed instead of being sent verbatim.
+pub fn effective_base_url(global: &GlobalArgs, profile: &Profile) -> crate::error::Result<String> {
+    let chosen = global
+        .base_url
+        .as_deref()
+        .filter(|url| !url.is_empty())
+        .unwrap_or(&profile.base_url);
+    validate_endpoint("base_url", chosen)?;
+    Ok(chosen.to_string())
 }
 
 // A command with no documented flags yet.
@@ -926,18 +941,20 @@ fn help_trailer(command: &clap::Command) -> String {
 impl Cli {
     /// Dispatch the parsed command tree.
     ///
-    /// Slice 0: only `tui`, `help`, `tree` and `completion` reach an
-    /// implementation; every other family returns the staging error for its
-    /// full command path.
+    /// `auth` and `profile` reach their own dispatch; the remaining families
+    /// return the staging error for their full command path until their slice
+    /// implements them.
     pub fn run(self) -> crate::error::Result<()> {
-        match self.command {
+        let Cli { global, command } = self;
+
+        match command {
             Command::Tui(args) => tui::run(args),
             Command::Help(args) => help::run(args),
             Command::Tree(_) => tree::run(),
             Command::Completion(args) => completion::run(args),
 
-            Command::Auth(command) => command.dispatch(),
-            Command::Profile(command) => command.dispatch(),
+            Command::Auth(command) => command.dispatch(&global),
+            Command::Profile(command) => command.dispatch(&global),
             Command::Config(command) => command.dispatch(),
             Command::Org(command) => command.dispatch(),
             Command::Project(command) => command.dispatch(),

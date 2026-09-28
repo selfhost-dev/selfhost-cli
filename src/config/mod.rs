@@ -1,18 +1,32 @@
 //! Profile store for `~/.selfhost/config.json` (design §5).
 //!
-//! Slice 0 ships the serde model only: no file I/O, no `0600` handling, no
-//! flag/env/profile precedence resolution, no MCP import. Those land in the
-//! config/auth slices and read these types.
+//! The serde model plus [`store`]: first-run seeding, `0600` permission
+//! discipline, atomic writes and profile resolution.
 
 #![allow(dead_code)] // Slice 0: the store is consumed by the auth/config slices.
+
+pub mod store;
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub use store::{ProfileStore, STORE_DIR, STORE_FILE, validate_endpoint};
+
 /// Profile used when `--profile`/`SELFHOSTDEV_PROFILE` are absent.
 pub const DEFAULT_PROFILE: &str = "default";
+
+/// Environment variable with the Firebase web API key; the name is shared with
+/// the MCP server so one CI secret pair works for both (design §5).
+pub const ENV_FIREBASE_API_KEY: &str = "FIREBASE_API_KEY";
+
+/// Environment variable with the Firebase refresh token (see [`ENV_FIREBASE_API_KEY`]).
+pub const ENV_FIREBASE_REFRESH_TOKEN: &str = "FIREBASE_REFRESH_TOKEN";
+
+/// Credential file written by the MCP server; imported once into a profile and
+/// otherwise left untouched (design §5).
+pub const MCP_CREDENTIALS_FILE: &str = "credentials.json";
 
 /// Names of the built-in profiles, seeded as ordinary profiles on first run (§5).
 pub const BUILTIN_PROFILE_NAMES: [&str; 3] = ["prod", "qa", "local"];
@@ -29,14 +43,6 @@ pub const LOCAL_BASE_URL: &str = "http://localhost:3000";
 /// Production console URL, used for the browser-login hop.
 pub const PROD_CONSOLE_URL: &str = "https://console.selfhost.dev";
 
-/// QA console URL.
-///
-/// [INFERENCE: needs platform confirmation] No QA console hostname exists anywhere in
-/// the ecosystem; `https://console.selfhost.dev` is the single known console host
-/// (`selfhost-mcp/src/config.ts:9`), so QA reuses it until the platform owner confirms
-/// a separate QA console.
-pub const QA_CONSOLE_URL: &str = PROD_CONSOLE_URL;
-
 /// Default API base URL (production).
 pub const DEFAULT_BASE_URL: &str = PROD_BASE_URL;
 
@@ -48,12 +54,16 @@ pub const DEFAULT_CONSOLE_URL: &str = PROD_CONSOLE_URL;
 /// Built-ins are ordinary profiles: seeding them into the store is a config-slice
 /// concern (file I/O); this is the pure model.
 ///
-/// `local` has no known console URL, so its [`Profile::console_url`] is `None`
-/// ([INFERENCE: needs platform confirmation]).
+/// Neither `qa` nor `local` ships a console URL, so their [`Profile::console_url`]
+/// is `None`.
+///
+/// QA's console host is environment-specific: it is deliberately not shipped in
+/// this public repo and is set once per machine with
+/// `selfhost profile set qa console_url <url>`.
 pub fn builtin_profile(name: &str) -> Option<Profile> {
     let (base_url, console_url) = match name {
         "prod" => (PROD_BASE_URL, Some(PROD_CONSOLE_URL)),
-        "qa" => (QA_BASE_URL, Some(QA_CONSOLE_URL)),
+        "qa" => (QA_BASE_URL, None),
         "local" => (LOCAL_BASE_URL, None),
         _ => return None,
     };
@@ -158,10 +168,7 @@ mod tests {
             builtin_profile("prod").unwrap().console_url.as_deref(),
             Some(PROD_CONSOLE_URL)
         );
-        assert_eq!(
-            builtin_profile("qa").unwrap().console_url.as_deref(),
-            Some(PROD_CONSOLE_URL)
-        );
+        assert_eq!(builtin_profile("qa").unwrap().console_url, None);
         assert_eq!(builtin_profile("local").unwrap().console_url, None);
     }
 

@@ -36,7 +36,23 @@ selfhost --base-url http://localhost:3000 postgres list
 
 Flags have env var equivalents: `SELFHOSTDEV_PROFILE`, `SELFHOSTDEV_BASE_URL`, `SELFHOSTDEV_ORG`.
 
-Output is a table on a terminal and JSON when piped. Force it with `-o table|json|yaml` or `--json`. Sign in is not wired up yet, so authenticated commands still stop at `not implemented yet` and exit 1.
+Output is a table on a terminal and JSON when piped. Force it with `-o table|json|yaml` or `--json`. Commands that need a sign-in stop with exit 3 until you run `selfhost auth login`.
+
+## Sign in
+
+```sh
+selfhost auth login              # opens your browser to finish sign-in
+selfhost auth login --no-browser # print the URL instead, for a remote machine
+selfhost auth status             # what the current profile can do
+selfhost auth logout             # drop the saved credentials
+selfhost auth token              # print the access token for scripts
+```
+
+`auth login` hands off to the console and comes back to the CLI when you are done; on a remote machine, pass `--no-browser`, open the printed URL yourself, and paste the redirect URL from the browser's address bar back into the terminal. `auth status` is a checklist and exits 3 when something is missing. `auth token` prints the short-lived access token on stdout only, so keep it out of logs.
+
+Profiles decide where a command points and which credentials it uses. Select one with `--profile` or `SELFHOSTDEV_PROFILE`; add one with `selfhost profile add staging --base-url https://api.staging.example.com`, and make it the default with `selfhost profile use qa`.
+
+In CI or any headless environment, set `FIREBASE_API_KEY` and `FIREBASE_REFRESH_TOKEN` — the same pair the MCP server uses — and no login step is needed.
 
 ## Commands
 
