@@ -74,3 +74,7 @@ $ echo $?
 
 That is the staging mechanism for the remaining slices (1 core client/auth,
 2 `postgres` parity, 3 other engines, 4 project plane, 5 account/ops, 6 watch/polish).
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
