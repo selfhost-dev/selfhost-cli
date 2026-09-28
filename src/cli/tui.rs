@@ -1,9 +1,10 @@
 //! `tui` — the interactive terminal UI (design §3, §4, §7 Slice 7).
 //!
-//! Slice 0 registers the surface and stages the behaviour, exactly like every
-//! other command: the handler answers `not implemented yet: tui` and exits 1.
-//! The TUI itself (ratatui + crossterm over the same client/auth/profiles as the
-//! CLI) is Slice 7 and adds no dependency to this tree.
+//! `selfhost tui` (and bare `selfhost` on an interactive terminal) renders the
+//! welcome-screen scaffold in [`crate::tui`], built on `ratatui`/`crossterm` —
+//! both already direct dependencies of this crate. The full multi-view UI
+//! (overview/clusters/projects/deploys/alerts/wallet) over the same
+//! client/auth/profiles as the CLI is Slice 7.
 //!
 //! Bare `selfhost` on an interactive terminal also lands here (k9s-style): see
 //! [`should_launch_tui`] for the guard that keeps scripts and CI out.

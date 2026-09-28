@@ -20,8 +20,9 @@ cargo test             # surface tests for the clap tree
 ./target/debug/selfhost                          # same, when run bare on a terminal
 ```
 
-Requires Rust 1.88+ (MSRV is set by the newest dependencies, `comfy-table` and the
-`icu_*` crates pulled in through `reqwest`/`url`).
+Requires Rust 1.88+ (MSRV is set by the newest dependencies: `comfy-table` and the
+`icu_*` crates pulled in through `reqwest`/`url`, plus `ratatui` 0.30.2, the `ratatui_*`
+crates and `time` 0.3.55).
 
 ## Module map
 

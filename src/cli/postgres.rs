@@ -106,8 +106,6 @@ stub_group!(
         Disable(PidArgs) => "disable",
         /// Change connection pooler settings
         Update(PoolUpdateArgs) => "update",
-        /// Reload the pooler's user list
-        ReloadUsers(PidArgs) => "reload-users",
     }
     groups {}
 );

@@ -31,10 +31,13 @@ pub fn run(args: HelpArgs) -> Result<()> {
         target = target.bin_name(format!("selfhost {}", args.command.join(" ")));
     }
 
-    target
-        .print_help()
-        .map_err(|err| Error::Other(err.into()))?;
-    println!();
+    // A closed pipe (`selfhost help postgres users | head`) is a clean exit, not an
+    // error — same contract as `tree` (see `tree::write_stdout`).
+    match target.print_help() {
+        Ok(()) => println!(),
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(err) => return Err(Error::Other(err.into())),
+    }
     Ok(())
 }
 

@@ -263,7 +263,7 @@ pub struct LogsArgs {
     #[arg(long)]
     pub source: Option<String>,
 
-    /// Keep polling until the run/instance ends (honors 429 cooldowns)
+    /// Keep showing new output until it finishes
     #[arg(long)]
     pub follow: bool,
 
@@ -853,7 +853,8 @@ fn help_trailer(command: &clap::Command) -> String {
          selfhost --profile qa postgres list --format json # list QA PostgreSQL databases\n  \
          selfhost postgres create --provider hetzner --name pg-staging --ha\n  \
          selfhost project db create postgres --project acme-api --name app-db\n  \
-         selfhost deploy trigger acme-api --branch main --follow\n\n\
+         selfhost deploy trigger acme-api --branch main --follow\n  \
+         selfhost tui   # open the interactive terminal UI\n\n\
          Run selfhost with no arguments to open the interactive terminal UI\n  \
          (same as selfhost tui). Set SELFHOST_NO_TUI=1 to print help instead.",
     );

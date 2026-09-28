@@ -306,6 +306,25 @@ fn engine_groups_expose_exactly_their_supported_verbs() {
     }
 }
 
+/// Pooling is one controller per engine, and each only routes
+/// `show`/`create`/`update`/`destroy` (`config/routes.rb:382-384`): reloading the
+/// pooler's user list is an internal agent task, so no `reload-users` verb exists.
+#[test]
+fn pool_groups_do_not_advertise_reload_users() {
+    for engine in ["postgres", "mysql", "clickhouse"] {
+        let stdout = help_of(&format!("{engine} pool"));
+        let verbs: Vec<String> = commands_with_about(&stdout)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(
+            verbs,
+            ["show", "enable", "disable", "update"],
+            "`selfhost {engine} pool` verb set drifted (reload-users has no route):\n{stdout}"
+        );
+    }
+}
+
 /// `--provider` must be discoverable on every engine's `create` and `list`.
 #[test]
 fn every_engine_create_and_list_offer_the_provider_flag() {
