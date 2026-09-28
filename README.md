@@ -1,80 +1,70 @@
-# selfhost-cli
+# selfhost
 
-The SelfHost platform CLI: one `selfhost` binary for servers, managed databases,
-projects and deployments on [selfhost.dev](https://selfhost.dev).
+The command line for SelfHost. One binary to manage databases, projects, and deployments.
 
-Standalone repo — it speaks the platform HTTP API and keeps per-profile credentials
-under `~/.selfhost/`. Design contract lives in `../selfhost-cli-design.md`
-(§3 the `--help` surface, §4 command families, §5 profiles/auth, §6 conventions,
-§7 the build plan this repo is being implemented slice by slice).
+This project is young. The full command tree exists and every command has help, but most commands still answer `not implemented yet` until that part is built. Help, shell completions, the tree printer, and the welcome screen already work.
 
-## Build & run
+## Install
+
+You need Rust 1.88 or newer.
 
 ```sh
-cargo build            # -> ./target/debug/selfhost
-cargo test             # surface tests for the clap tree
+cargo build
 ./target/debug/selfhost --help
-./target/debug/selfhost tree                     # every command path, one per line
-./target/debug/selfhost completion bash          # bash | zsh | fish
-./target/debug/selfhost tui                      # welcome screen (needs a terminal)
-./target/debug/selfhost                          # same, when run bare on a terminal
 ```
 
-Requires Rust 1.88+ (MSRV is set by the newest dependencies: `comfy-table` and the
-`icu_*` crates pulled in through `reqwest`/`url`, plus `ratatui` 0.30.2, the `ratatui_*`
-crates and `time` 0.3.55).
-
-## Module map
-
-```
-src/main.rs        clap parse + process exit-code plumbing
-src/cli/           one module per command family, plus the `tree` / `completion` /
-                   `help` implementations and the shared argument structs
-src/api/           typed HTTP client (envelope, org injection, 429/Retry-After) — Slice 1
-src/auth/          browser loopback login (`/mcp-auth`), token cache, MCP import — Slice 1
-src/config/        `~/.selfhost/config.json` profile-store types — Slice 1
-src/output/        table / json / yaml rendering + exit-code map
-src/watch/         poll loops for `--wait` / `--follow` — Slice 6
-```
-
-## Status
-
-Scaffold only; see design doc §7 for slices. This commit (Slice 0) registers the whole
-documented command surface with real clap subcommands and implements exactly:
-
-- argument parsing, `--help` / `help <cmd>` / `--version`
-- `tree` (generic recursion over the clap command tree)
-- `completion <bash|zsh|fish>` (clap_complete)
-- `tui` — the interactive UI, a welcome-screen scaffold today: bare `selfhost` on an
-  interactive terminal (or explicit `selfhost tui`) opens it; `q`/`Esc`/`Ctrl-C` quit.
-  The full views land in Slice 7 over the same client/auth/profiles (design §4, §7);
-  non-TTY invocations stay on the CLI and exit 2.
-- the output layer: `Format` (`table` / `json` / `yaml`) rendering of `serde_json::Value`
-  and the exit-code map (0 ok, 1 error, 2 usage, 3 unauthenticated, 4 billing,
-  75 rate-limited)
-- the `config` module's serde types for the profile store (types only)
-
-The help surface is part of the product, not a debug dump: every command carries a
-one-line `about`, each engine group advertises exactly the verbs the platform supports
-for it (design §3 table), and the `--help` trailer is generated from the registered tree
-by `cli::help_trailer` so it can never claim a verb an engine group lacks.
-`tests/cli_surface.rs` pins all three.
-
-## Deferred
-
-Everything else. Every command that has no implementation yet returns
-`not implemented yet: <full command path>` on stderr and exits 1:
+## Try it
 
 ```sh
-$ selfhost org list
-not implemented yet: org list
-$ echo $?
-1
+selfhost --help             # everything it can do
+selfhost postgres --help    # one database engine
+selfhost tree               # every command, one per line
+selfhost completion bash    # also zsh and fish
+selfhost tui                # welcome screen, needs a terminal
 ```
 
-That is the staging mechanism for the remaining slices (1 core client/auth,
-2 `postgres` parity, 3 other engines, 4 project plane, 5 account/ops, 6 watch/polish).
+Running bare `selfhost` on a terminal opens the welcome screen too. Press q to quit. Set `SELFHOST_NO_TUI=1` to get plain help output instead.
+
+## Point it somewhere
+
+The built-in profiles are `prod`, `qa`, and `local`. Pick one, or pass a URL per command.
+
+```sh
+selfhost --profile qa postgres list
+selfhost --base-url http://localhost:3000 postgres list
+```
+
+Flags have env var equivalents: `SELFHOST_PROFILE`, `SELFHOST_BASE_URL`, `SELFHOST_ORG`.
+
+Output is a table on a terminal and JSON when piped. Force it with `-o table|json|yaml` or `--json`. Sign in is not wired up yet, so authenticated commands still stop at `not implemented yet` and exit 1.
+
+## Commands
+
+| Command | What it is for |
+|---|---|
+| auth | Sign in, sign out, check the session |
+| profile | Saved profiles: endpoints, default org |
+| config | Your saved default settings |
+| org | Organizations, members, invitations |
+| project | Projects with databases, services, backups |
+| deploy | Deploy a repo, watch runs, set env vars and domains |
+| github | Connected repos, branches, build settings |
+| domain | Custom domains and their DNS status |
+| postgres, mysql, mongo, redis, clickhouse, opensearch | Managed databases, one group per engine |
+| catalog | Regions, instance types, cost estimates |
+| billing | Wallet, top-ups, transactions |
+| cloud | Cloud provider credentials |
+| network | VPCs, subnets, security groups |
+| ssh-key | SSH keys for the org and projects |
+| alert | Alert rules and fired alerts |
+| scaling | Scaling policies and capacity plans |
+| webhook | Webhook endpoints for the org |
+| tui | The interactive terminal UI |
+| tree | Every command, one per line |
+| completion | Shell completions for bash, zsh, fish |
+
+Every command takes the same global flags: `--profile`, `--base-url`, `--org`, `-o/--format`, `--json`, `--no-color`, `--timeout`, `--poll-interval`, `-y/--yes`, `--dry-run`, `-q/--quiet`, `-v/--verbose`, `--debug`.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+Apache 2.0. See LICENSE for the full text.
