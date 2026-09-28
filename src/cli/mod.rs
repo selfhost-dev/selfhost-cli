@@ -2,15 +2,19 @@
 //!
 //! Slice 0 registers the complete documented surface as real clap subcommands and
 //! stages the behaviour: commands whose implementation a later slice owns answer with
-//! `not implemented yet: <full command path>`. `auth` and `profile` are real, as are
-//! `tui`, `help`, `tree` and `completion`.
+//! `not implemented yet: <full command path>`. `auth`, `profile` and the organization
+//! commands are real, as are `tui`, `help`, `tree` and `completion`.
 //!
 //! * adding a command: one line in the group's [`stub_group!`] call;
 //! * adding behaviour: a real arm in the group's dispatch, or a new group module.
 
+use anyhow::anyhow;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use serde_json::Value;
 
-use crate::config::{Profile, validate_endpoint};
+use crate::api::ApiClient;
+use crate::config::{Profile, ProfileStore, validate_endpoint};
+use crate::error::{Error, Result};
 use crate::output::Format;
 
 pub mod alert;
@@ -234,6 +238,150 @@ pub fn effective_base_url(global: &GlobalArgs, profile: &Profile) -> crate::erro
         .unwrap_or(&profile.base_url);
     validate_endpoint("base_url", chosen)?;
     Ok(chosen.to_string())
+}
+
+/// The organization reference this run should resolve: a command's own
+/// argument first, then an explicit `--org` / `SELFHOSTDEV_ORG` (an empty
+/// value counts as unset, like `--base-url`), then the profile's stored org.
+/// `None` means nothing selected one.
+pub fn org_reference<'a>(
+    explicit: Option<&'a str>,
+    global: &'a GlobalArgs,
+    profile: &'a Profile,
+) -> Option<&'a str> {
+    [explicit, global.org.as_deref(), profile.org.as_deref()]
+        .into_iter()
+        .flatten()
+        .find(|reference| !reference.is_empty())
+}
+
+/// The usage error for an org-scoped command with no organization anywhere:
+/// the profile has none, and neither `--org` nor the command named one.
+pub fn no_organization_selected() -> Error {
+    Error::Usage("no organization selected; run selfhost org use <slug>".to_string())
+}
+
+/// The usage error for a reference that is not one of the caller's
+/// organizations.
+pub fn unknown_organization(reference: &str) -> Error {
+    Error::Usage(format!(
+        "unknown organization '{reference}'; run selfhost org list"
+    ))
+}
+
+/// The longest organization pid accepted: the server's `org_<hex>` values are
+/// far shorter, so anything beyond this is hostile input, not a real pid.
+const ORGANIZATION_PID_MAX: usize = 64;
+
+/// Whether `reference` is already an organization pid (`org_<hex>`, within
+/// [`ORGANIZATION_PID_MAX`]), which [`resolve_org_pid`] injects without a
+/// lookup. Anything else is a slug.
+pub fn is_org_pid(reference: &str) -> bool {
+    reference.len() <= ORGANIZATION_PID_MAX
+        && reference
+            .strip_prefix("org_")
+            .is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+/// The pid an organization record carries: `pid` on the raw payloads, `id` on
+/// the serialized membership payload. Only a value shaped like a pid is
+/// accepted; anything else counts as no pid, so it never reaches a request path.
+pub fn organization_pid(organization: &Value) -> Option<&str> {
+    organization
+        .get("pid")
+        .and_then(Value::as_str)
+        .or_else(|| organization.get("id").and_then(Value::as_str))
+        .filter(|pid| is_org_pid(pid))
+}
+
+/// Whether an organization record is the one `reference` names, by pid or slug
+/// — exactly, never as a prefix.
+pub fn organization_matches(organization: &Value, reference: &str) -> bool {
+    organization_pid(organization) == Some(reference)
+        || organization.get("slug").and_then(Value::as_str) == Some(reference)
+}
+
+/// The organization named by `reference` in a `GET /organizations` payload,
+/// matched by pid or slug — exactly, never as a prefix.
+pub fn find_organization<'a>(organizations: &'a Value, reference: &str) -> Option<&'a Value> {
+    organizations
+        .as_array()?
+        .iter()
+        .find(|organization| organization_matches(organization, reference))
+}
+
+/// Resolve an organization reference to the pid to inject: a pid is used as-is,
+/// anything else is an exact slug lookup against the caller's organizations
+/// (the unscoped `GET /organizations`). An unknown reference is a usage error
+/// naming the listing command.
+pub async fn resolve_org_pid(client: &ApiClient, reference: &str) -> Result<String> {
+    if is_org_pid(reference) {
+        return Ok(reference.to_string());
+    }
+    let organizations = client.get_unscoped("/organizations", &[]).await?;
+    let organization = find_organization(&organizations, reference)
+        .ok_or_else(|| unknown_organization(reference))?;
+    organization_pid(organization)
+        .map(str::to_owned)
+        .ok_or_else(|| Error::Other(anyhow!("organization '{reference}' has no pid")))
+}
+
+/// Run one async handler on a current-thread runtime.
+pub fn block_on<F: Future<Output = Result<()>>>(future: F) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| {
+            Error::Other(anyhow::Error::from(err).context("cannot start the async runtime"))
+        })?;
+    runtime.block_on(future)
+}
+
+/// Render a value in the resolved format on stdout.
+pub fn print(global: &GlobalArgs, value: &Value) -> Result<()> {
+    let format = Format::resolve(global.format, global.json);
+    println!("{}", format.render(value)?);
+    Ok(())
+}
+
+/// The client every command starts from: the selected profile's endpoint (or
+/// the `--base-url` override), a fresh access token, and the request echo.
+/// Organization injection stays off until [`org_client`].
+pub async fn unscoped_client(
+    store: &mut ProfileStore,
+    name: &str,
+    global: &GlobalArgs,
+) -> Result<ApiClient> {
+    let base_url = {
+        let profile = store.require_profile(name)?;
+        effective_base_url(global, profile)?
+    };
+    let token = crate::auth::id_token(store, name).await?;
+    Ok(ApiClient::with_token(&base_url, token, global.timeout)
+        .with_verbosity(global.verbose, global.debug))
+}
+
+/// The client an org-scoped command works against, plus the pid it resolved:
+/// [`unscoped_client`] with [`org_reference`]'s organization injected into
+/// every scoped request, so `--org` / `SELFHOSTDEV_ORG` (then the profile's
+/// stored org) reach any command that inherits this path. `explicit` is the
+/// command's own positional argument, which wins over both. The injected value
+/// is always the resolved pid, never the slug. No reference anywhere fails
+/// before a credential is needed.
+pub async fn org_client(
+    store: &mut ProfileStore,
+    name: &str,
+    global: &GlobalArgs,
+    explicit: Option<&str>,
+) -> Result<(ApiClient, String)> {
+    let reference = {
+        let profile = store.require_profile(name)?;
+        org_reference(explicit, global, profile).map(str::to_owned)
+    };
+    let reference = reference.ok_or_else(no_organization_selected)?;
+    let client = unscoped_client(store, name, global).await?;
+    let pid = resolve_org_pid(&client, &reference).await?;
+    Ok((client.with_org(Some(pid.clone())), pid))
 }
 
 // A command with no documented flags yet.
@@ -578,6 +726,43 @@ impl std::fmt::Debug for UserUpdateArgs {
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
             .field("role", &self.role)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod organization_pid_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A pid is interpolated into request paths, so only the `org_<hex>` shape
+    /// is accepted: a hostile reference never becomes an organization pid.
+    #[test]
+    fn organization_pids_reject_hostile_or_overlong_values() {
+        for hostile in [
+            "../../etc/passwd",
+            "org_a1/../b2",
+            "org_a1/activity_logs",
+            "org_a1?page=1",
+            "org_a1#frag",
+            "org_a1 slug",
+            "org_",
+        ] {
+            assert!(!is_org_pid(hostile), "{hostile:?} must not be a pid");
+        }
+
+        // 64 characters is the ceiling; the 65th is refused.
+        let at_bound = format!("org_{}", "a".repeat(60));
+        assert_eq!(at_bound.len(), 64);
+        assert!(is_org_pid(&at_bound), "a 64-character pid is accepted");
+        let overlong = format!("org_{}", "a".repeat(61));
+        assert_eq!(overlong.len(), 65);
+        assert!(!is_org_pid(&overlong), "a 65-character pid is refused");
+
+        // A record carrying a hostile pid counts as no pid at all.
+        assert_eq!(organization_pid(&json!({"pid": "org_a1/../b2"})), None);
+        assert_eq!(organization_pid(&json!({"id": overlong})), None);
+        assert_eq!(organization_pid(&json!({"pid": ""})), None);
+        assert_eq!(organization_pid(&json!({"pid": "org_a1"})), Some("org_a1"));
     }
 }
 
@@ -941,9 +1126,9 @@ fn help_trailer(command: &clap::Command) -> String {
 impl Cli {
     /// Dispatch the parsed command tree.
     ///
-    /// `auth` and `profile` reach their own dispatch; the remaining families
-    /// return the staging error for their full command path until their slice
-    /// implements them.
+    /// `auth`, `profile` and `org` reach their own dispatch; the remaining
+    /// families return the staging error for their full command path until
+    /// their slice implements them.
     pub fn run(self) -> crate::error::Result<()> {
         let Cli { global, command } = self;
 
@@ -956,7 +1141,7 @@ impl Cli {
             Command::Auth(command) => command.dispatch(&global),
             Command::Profile(command) => command.dispatch(&global),
             Command::Config(command) => command.dispatch(),
-            Command::Org(command) => command.dispatch(),
+            Command::Org(command) => command.dispatch(&global),
             Command::Project(command) => command.dispatch(),
             Command::Deploy(command) => command.dispatch(),
             Command::Github(command) => command.dispatch(),

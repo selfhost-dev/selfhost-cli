@@ -5,9 +5,8 @@ use serde_json::{Value, json};
 
 use crate::config::{PROD_CONSOLE_URL, Profile, ProfileStore, validate_endpoint};
 use crate::error::{Error, Result};
-use crate::output::Format;
 
-use super::{GlobalArgs, NameArgs};
+use super::{GlobalArgs, NameArgs, print};
 
 // `profile add <name>` — the base URL comes from global `--base-url`/`--org`.
 #[derive(Debug, Clone, Args)]
@@ -259,13 +258,6 @@ fn signed_in(profile: &Profile) -> bool {
             .firebase_refresh_token
             .as_deref()
             .is_some_and(|value| !value.is_empty())
-}
-
-/// Render a value in the resolved format on stdout.
-fn print(global: &GlobalArgs, value: &Value) -> Result<()> {
-    let format = Format::resolve(global.format, global.json);
-    println!("{}", format.render(value)?);
-    Ok(())
 }
 
 /// A profile must exist before it can be shown, changed or removed; nothing in

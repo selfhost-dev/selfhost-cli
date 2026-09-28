@@ -113,13 +113,98 @@ fn collect_columns(items: &[Value]) -> Vec<String> {
 fn cell(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
-        Value::String(text) => text.clone(),
+        Value::String(text) => strip_control_characters(text),
         Value::Bool(flag) => flag.to_string(),
         Value::Number(number) => number.to_string(),
         nested => compact(nested),
     }
 }
 
+/// Server data reaches the terminal through a table cell, and this CLI is the
+/// first to render third-party strings (organization names and slugs, member
+/// names and emails, activity actors). Strip control characters — Unicode `Cc`,
+/// which covers ESC, C0/C1, DEL, CR and LF — so a hostile string can never drive
+/// the terminal. Also strip the bidi overrides/isolates (`U+202A..=U+202E`,
+/// `U+2066..=U+2069`): they are not `Cc`, but they reorder the text around them
+/// and so spoof a table just as well. The directional marks `U+200E`/`U+200F`
+/// are legitimate and stay. JSON and YAML output stay byte-exact and skip this.
+pub(crate) fn strip_control_characters(text: &str) -> String {
+    text.chars()
+        .filter(|character| {
+            !character.is_control()
+                && !matches!(*character, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect()
+}
+
 fn compact(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| String::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A server-supplied name carrying a terminal escape (OSC 52, followed by
+    /// BEL) must render without the control bytes that would drive the terminal.
+    #[test]
+    fn table_cells_drop_terminal_control_sequences() {
+        let value = json!([{
+            "name": "Acme\u{1b}]52;c;cGF5bG9hZA==\u{7}",
+            "role": "owner",
+        }]);
+
+        let table = render_table(&value);
+        assert!(!table.contains('\u{1b}'), "{table:?}");
+        assert!(!table.contains('\u{7}'), "{table:?}");
+        assert!(table.contains("Acme]52;c;cGF5bG9hZA=="), "{table:?}");
+    }
+
+    /// A right-to-left override in a cell reorders the text around it, so a
+    /// hostile name could spoof the tail of a row. The override goes the way of
+    /// any control character; the plain text around it survives.
+    #[test]
+    fn table_cells_drop_direction_overrides() {
+        let value = json!([{
+            "name": "\u{202e}Acme",
+            "role": "owner",
+        }]);
+
+        let table = render_table(&value);
+        assert!(!table.contains('\u{202e}'), "{table:?}");
+        assert!(table.contains("Acme"), "{table:?}");
+    }
+
+    /// The exact codepoints the widening covers, and the two directional marks
+    /// it deliberately leaves alone: the boundary is neither wider nor narrower.
+    #[test]
+    fn table_cells_drop_every_bidi_override_but_keep_the_marks() {
+        for (codepoint, dropped) in [
+            ('\u{202a}', true),
+            ('\u{202b}', true),
+            ('\u{202c}', true),
+            ('\u{202d}', true),
+            ('\u{202e}', true),
+            ('\u{2066}', true),
+            ('\u{2067}', true),
+            ('\u{2068}', true),
+            ('\u{2069}', true),
+            ('\u{200e}', false),
+            ('\u{200f}', false),
+        ] {
+            let stripped = strip_control_characters(&format!("a{codepoint}b"));
+            assert_eq!(stripped == "ab", dropped, "U+{:04X}: {stripped:?}", codepoint as u32);
+        }
+    }
+
+    /// JSON and YAML are machine-readable and stay byte-exact: the escape that a
+    /// table drops is still present, only escaped by the serializer.
+    #[test]
+    fn json_output_keeps_the_control_characters() {
+        let value = json!({"name": "Acme\u{1b}]52;c;cGF5bG9hZA==\u{7}"});
+        let rendered = Format::Json.render(&value).unwrap();
+        assert!(rendered.contains("\\u001b"), "{rendered}");
+        assert!(rendered.contains("\\u0007"), "{rendered}");
+    }
 }

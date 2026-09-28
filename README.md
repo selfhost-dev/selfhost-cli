@@ -54,6 +54,20 @@ Profiles decide where a command points and which credentials it uses. Select one
 
 In CI or any headless environment, set `FIREBASE_API_KEY` and `FIREBASE_REFRESH_TOKEN` — the same pair the MCP server uses — and no login step is needed.
 
+## Organizations
+
+```sh
+selfhost org list                    # every organization you belong to
+selfhost org show                    # details for the one you have selected
+selfhost org use acme                # choose the one other commands use
+selfhost org members list            # the people in it
+selfhost org activity list --page 2  # recent activity, newest first
+```
+
+`org list` marks the organization other commands use by default and also shows invitations that are still waiting. `org show`, `org members list` and `org activity list` work on that same organization, or on the one you name.
+
+Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it is; anything else is looked up among the organizations you belong to, so a slug that does not resolve is a usage error. The organization you name on the command line wins over `--org` and `SELFHOSTDEV_ORG`, which in turn win over the organization saved in the profile; an empty value counts as unset. `org list` and `org use` ignore `--org` — the listing has to work even when the saved organization is gone, and `org use` is how you replace it.
+
 ## Commands
 
 | Command | What it is for |
@@ -61,7 +75,7 @@ In CI or any headless environment, set `FIREBASE_API_KEY` and `FIREBASE_REFRESH_
 | auth | Sign in, sign out, check the session |
 | profile | Saved profiles: endpoints, default org |
 | config | Your saved default settings |
-| org | Organizations, members, invitations |
+| org | Organizations: list, show, select the default, members, activity |
 | project | Projects with databases, services, backups |
 | deploy | Deploy a repo, watch runs, set env vars and domains |
 | github | Connected repos, branches, build settings |

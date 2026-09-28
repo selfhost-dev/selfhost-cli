@@ -10,7 +10,7 @@ use crate::config::{ProfileStore, STORE_DIR, STORE_FILE};
 use crate::error::{Error, Result};
 use crate::output::Format;
 
-use super::{GlobalArgs, NoArgs, effective_base_url};
+use super::{GlobalArgs, NoArgs, block_on, effective_base_url};
 
 // `auth login [--no-browser]` — browser OAuth through `${console_url}/mcp-auth`.
 #[derive(Debug, Clone, Args)]
@@ -50,17 +50,6 @@ impl AuthCommand {
             Self::Token(_) => block_on(token(global)),
         }
     }
-}
-
-/// Run one async handler on a current-thread runtime.
-fn block_on<F: Future<Output = Result<()>>>(future: F) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| {
-            Error::Other(anyhow::Error::from(err).context("cannot start the async runtime"))
-        })?;
-    runtime.block_on(future)
 }
 
 /// `auth login`: credentials first, platform account second.
@@ -369,19 +358,19 @@ fn account_detail(details: &Value) -> String {
 }
 
 /// `<name> (<pid>)` for the membership named by pid or slug.
-fn find_organization(organizations: &Value, wanted: &str) -> Option<String> {
-    organizations.as_array()?.iter().find_map(|org| {
-        let pid = org.get("id").and_then(Value::as_str).unwrap_or_default();
-        let slug = org.get("slug").and_then(Value::as_str).unwrap_or_default();
-        (pid == wanted || slug == wanted).then(|| {
-            let name = org
-                .get("name")
-                .and_then(Value::as_str)
-                .filter(|name| !name.is_empty())
-                .unwrap_or(slug);
-            format!("{name} ({pid})")
-        })
-    })
+fn organization_detail(organizations: &Value, wanted: &str) -> Option<String> {
+    let organization = super::find_organization(organizations, wanted)?;
+    let pid = super::organization_pid(organization).unwrap_or_default();
+    let slug = organization
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let name = organization
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(slug);
+    Some(format!("{name} ({pid})"))
 }
 
 /// The organization row: the configured org must be one of the memberships.
@@ -400,7 +389,7 @@ async fn organization_check(client: Option<&ApiClient>, org: &str) -> (Value, Op
         );
     };
     match client.get_unscoped("/organizations", &[]).await {
-        Ok(organizations) => match find_organization(&organizations, org) {
+        Ok(organizations) => match organization_detail(&organizations, org) {
             Some(detail) => (check("organization", "ok", detail), None),
             None => (
                 check(

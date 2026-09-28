@@ -421,11 +421,13 @@ fn tree_prints_the_command_tree() {
 #[test]
 fn unimplemented_commands_report_their_full_path() {
     selfhost()
-        .args(["org", "list"])
+        .args(["org", "invites", "list"])
         .assert()
         .failure()
         .code(1)
-        .stderr(predicate::str::contains("not implemented yet: org list"));
+        .stderr(predicate::str::contains(
+            "not implemented yet: org invites list",
+        ));
 
     selfhost()
         .args(["postgres", "users", "rotate-password", "awsinst_1", "app"])
@@ -588,4 +590,17 @@ fn env_flag_is_rejected() {
         .failure()
         .code(2)
         .stderr(predicate::str::contains("--env"));
+}
+
+/// `org activity list --limit` is clamped to 1..=200 before any request.
+#[test]
+fn activity_limit_outside_the_documented_range_is_rejected() {
+    for out_of_range in ["0", "1000"] {
+        selfhost()
+            .args(["org", "activity", "list", "--limit", out_of_range])
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("--limit"));
+    }
 }
