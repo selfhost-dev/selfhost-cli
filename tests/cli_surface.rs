@@ -28,6 +28,7 @@ const TOP_LEVEL_GROUPS: &[&str] = &[
     "alert",
     "scaling",
     "webhook",
+    "tui",
     "help",
     "tree",
     "completion",
@@ -415,6 +416,79 @@ fn unimplemented_commands_report_their_full_path() {
         .stderr(predicate::str::contains(
             "not implemented yet: postgres users rotate-password",
         ));
+}
+
+#[test]
+fn tui_is_registered_and_requires_a_terminal() {
+    // The command surface: `tui` is listed at the top level and carries a
+    // one-line about (the recursive walk in `every_command_has_a_customer_facing_about`
+    // also covers it).
+    let root = help_of("");
+    assert!(
+        root.lines()
+            .any(|line| line.trim_start().starts_with("tui ")),
+        "`--help` does not list the `tui` command:\n{root}"
+    );
+
+    // assert_cmd pipes both streams, so this exercises the non-TTY guard: a
+    // clean usage error and exit 2, never a UI waiting on input. The
+    // interactive path is covered by the `should_launch_tui` unit matrix and
+    // the `TestBackend` render test.
+    selfhost()
+        .arg("tui")
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "selfhost tui requires an interactive terminal",
+        ));
+}
+
+#[test]
+fn tui_rejects_an_unknown_view() {
+    selfhost()
+        .args(["tui", "--view", "nope"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("nope"));
+}
+
+#[test]
+fn tui_help_lists_every_flag() {
+    let stdout = help_of("tui");
+    for flag in ["--view", "--read-only", "--refresh"] {
+        assert!(
+            stdout.contains(flag),
+            "`selfhost tui --help` does not document {flag}:\n{stdout}"
+        );
+    }
+}
+
+/// A bare `selfhost` under a non-TTY (assert_cmd pipes both streams) keeps the
+/// CLI's usage output and exits 2 — scripts and CI must never block on the TUI.
+/// The interactive-TTY path (stdin/stdout TTY, TERM not dumb, SELFHOST_NO_TUI
+/// unset) is pinned by the `should_launch_tui` unit matrix in `src/cli/tui.rs`,
+/// which cannot be exercised through a piped child process.
+#[test]
+fn bare_invocation_without_a_tty_prints_usage() {
+    selfhost()
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("Usage: selfhost"));
+
+    // `--help` and `--version` always win over the TUI path.
+    selfhost().arg("--help").assert().success();
+    selfhost().arg("--version").assert().success();
+
+    // Global flags alone are still "no subcommand" — same non-TTY outcome.
+    selfhost()
+        .args(["--profile", "qa"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("Usage: selfhost"));
 }
 
 #[test]

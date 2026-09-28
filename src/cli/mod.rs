@@ -2,8 +2,8 @@
 //!
 //! Slice 0 registers the complete documented surface as real clap subcommands and
 //! stages the behaviour: commands whose implementation a later slice owns answer with
-//! `not implemented yet: <full command path>`. Only `help`, `tree` and `completion`
-//! do work here.
+//! `not implemented yet: <full command path>`. Only `tui`, `help`, `tree` and
+//! `completion` do work here.
 //!
 //! * adding a command: one line in the group's [`stub_group!`] call;
 //! * adding behaviour: a real arm in the group's dispatch, or a new group module.
@@ -36,6 +36,7 @@ pub mod redis;
 pub mod scaling;
 pub mod ssh_key;
 pub mod tree;
+pub mod tui;
 pub mod webhook;
 
 // Register a command group: its clap subcommands plus the Slice 0 staging error.
@@ -740,6 +741,9 @@ pub enum Command {
     #[command(subcommand)]
     Webhook(webhook::WebhookCommand),
 
+    /// Open the interactive terminal UI
+    Tui(tui::TuiArgs),
+
     /// Show help for a command
     Help(help::HelpArgs),
 
@@ -849,7 +853,9 @@ fn help_trailer(command: &clap::Command) -> String {
          selfhost --profile qa postgres list --format json # list QA PostgreSQL databases\n  \
          selfhost postgres create --provider hetzner --name pg-staging --ha\n  \
          selfhost project db create postgres --project acme-api --name app-db\n  \
-         selfhost deploy trigger acme-api --branch main --follow",
+         selfhost deploy trigger acme-api --branch main --follow\n\n\
+         Run selfhost with no arguments to open the interactive terminal UI\n  \
+         (same as selfhost tui). Set SELFHOST_NO_TUI=1 to print help instead.",
     );
     trailer
 }
@@ -857,10 +863,12 @@ fn help_trailer(command: &clap::Command) -> String {
 impl Cli {
     /// Dispatch the parsed command tree.
     ///
-    /// Slice 0: only `help`, `tree` and `completion` reach an implementation; every
-    /// other family returns the staging error for its full command path.
+    /// Slice 0: only `tui`, `help`, `tree` and `completion` reach an
+    /// implementation; every other family returns the staging error for its
+    /// full command path.
     pub fn run(self) -> crate::error::Result<()> {
         match self.command {
+            Command::Tui(args) => tui::run(args),
             Command::Help(args) => help::run(args),
             Command::Tree(_) => tree::run(),
             Command::Completion(args) => completion::run(args),

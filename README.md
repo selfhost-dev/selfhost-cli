@@ -16,6 +16,8 @@ cargo test             # surface tests for the clap tree
 ./target/debug/selfhost --help
 ./target/debug/selfhost tree                     # every command path, one per line
 ./target/debug/selfhost completion bash          # bash | zsh | fish
+./target/debug/selfhost tui                      # welcome screen (needs a terminal)
+./target/debug/selfhost                          # same, when run bare on a terminal
 ```
 
 Requires Rust 1.88+ (MSRV is set by the newest dependencies, `comfy-table` and the
@@ -42,6 +44,10 @@ documented command surface with real clap subcommands and implements exactly:
 - argument parsing, `--help` / `help <cmd>` / `--version`
 - `tree` (generic recursion over the clap command tree)
 - `completion <bash|zsh|fish>` (clap_complete)
+- `tui` — the interactive UI, a welcome-screen scaffold today: bare `selfhost` on an
+  interactive terminal (or explicit `selfhost tui`) opens it; `q`/`Esc`/`Ctrl-C` quit.
+  The full views land in Slice 7 over the same client/auth/profiles (design §4, §7);
+  non-TTY invocations stay on the CLI and exit 2.
 - the output layer: `Format` (`table` / `json` / `yaml`) rendering of `serde_json::Value`
   and the exit-code map (0 ok, 1 error, 2 usage, 3 unauthenticated, 4 billing,
   75 rate-limited)
