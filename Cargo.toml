@@ -1,0 +1,30 @@
+[package]
+name = "selfhost-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The SelfHost platform CLI"
+publish = false
+
+[[bin]]
+name = "selfhost"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.6.11"
+comfy-table = "8.0.1"
+dirs = "7.0.0"
+open = "5.4.4"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml_ng = "0.10.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
