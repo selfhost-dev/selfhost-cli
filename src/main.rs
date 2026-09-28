@@ -65,7 +65,7 @@ fn tui_enabled() -> bool {
     use std::io::IsTerminal;
 
     let term = std::env::var("TERM").ok();
-    let no_tui = std::env::var("SELFHOST_NO_TUI").ok();
+    let no_tui = std::env::var("SELFHOSTDEV_NO_TUI").ok();
     cli::tui::should_launch_tui(
         std::io::stdin().is_terminal(),
         std::io::stdout().is_terminal(),

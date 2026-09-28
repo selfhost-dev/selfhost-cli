@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Profile used when `--profile`/`SELFHOST_PROFILE` are absent.
+/// Profile used when `--profile`/`SELFHOSTDEV_PROFILE` are absent.
 pub const DEFAULT_PROFILE: &str = "default";
 
 /// Names of the built-in profiles, seeded as ordinary profiles on first run (§5).

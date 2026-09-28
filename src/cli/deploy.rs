@@ -50,8 +50,8 @@ pub struct EnvSetArgs {
     #[arg(long)]
     pub key: Option<String>,
 
-    /// Variable value. Prefer SELFHOST_DEPLOY_ENV_VALUE; flag values stay visible in shell history and the process list.
-    #[arg(long, env = "SELFHOST_DEPLOY_ENV_VALUE", hide_env_values = true)]
+    /// Variable value. Prefer SELFHOSTDEV_DEPLOY_ENV_VALUE; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOSTDEV_DEPLOY_ENV_VALUE", hide_env_values = true)]
     pub value: Option<String>,
 }
 
@@ -224,9 +224,9 @@ mod tests {
 
     #[test]
     fn deploy_env_value_env_fallback_parses() {
-        unsafe { std::env::set_var("SELFHOST_DEPLOY_ENV_VALUE", "env-canary-value") };
+        unsafe { std::env::set_var("SELFHOSTDEV_DEPLOY_ENV_VALUE", "env-canary-value") };
         let probe = SetProbe::try_parse_from(["probe"]).expect("env fallback must parse");
         assert_eq!(probe.args.value.as_deref(), Some("env-canary-value"));
-        unsafe { std::env::remove_var("SELFHOST_DEPLOY_ENV_VALUE") };
+        unsafe { std::env::remove_var("SELFHOSTDEV_DEPLOY_ENV_VALUE") };
     }
 }

@@ -15,10 +15,10 @@ pub struct CredentialAddArgs {
     #[arg(long = "access-key")]
     pub access_key: Option<String>,
 
-    /// Secret access key. Prefer SELFHOST_CLOUD_SECRET_KEY; flag values stay visible in shell history and the process list.
+    /// Secret access key. Prefer SELFHOSTDEV_CLOUD_SECRET_KEY; flag values stay visible in shell history and the process list.
     #[arg(
         long = "secret-key",
-        env = "SELFHOST_CLOUD_SECRET_KEY",
+        env = "SELFHOSTDEV_CLOUD_SECRET_KEY",
         hide_env_values = true
     )]
     pub secret_key: Option<String>,
@@ -47,10 +47,10 @@ pub struct CredentialUpdateArgs {
     #[arg(long = "access-key")]
     pub access_key: Option<String>,
 
-    /// Secret access key. Prefer SELFHOST_CLOUD_SECRET_KEY; flag values stay visible in shell history and the process list.
+    /// Secret access key. Prefer SELFHOSTDEV_CLOUD_SECRET_KEY; flag values stay visible in shell history and the process list.
     #[arg(
         long = "secret-key",
-        env = "SELFHOST_CLOUD_SECRET_KEY",
+        env = "SELFHOSTDEV_CLOUD_SECRET_KEY",
         hide_env_values = true
     )]
     pub secret_key: Option<String>,
@@ -149,9 +149,9 @@ mod tests {
 
     #[test]
     fn secret_key_env_fallback_parses() {
-        unsafe { std::env::set_var("SELFHOST_CLOUD_SECRET_KEY", "env-canary-secret") };
+        unsafe { std::env::set_var("SELFHOSTDEV_CLOUD_SECRET_KEY", "env-canary-secret") };
         let probe = AddProbe::try_parse_from(["probe"]).expect("env fallback must parse");
         assert_eq!(probe.args.secret_key.as_deref(), Some("env-canary-secret"));
-        unsafe { std::env::remove_var("SELFHOST_CLOUD_SECRET_KEY") };
+        unsafe { std::env::remove_var("SELFHOSTDEV_CLOUD_SECRET_KEY") };
     }
 }

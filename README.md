@@ -23,7 +23,7 @@ selfhost completion bash    # also zsh and fish
 selfhost tui                # welcome screen, needs a terminal
 ```
 
-Running bare `selfhost` on a terminal opens the welcome screen too. Press q to quit. Set `SELFHOST_NO_TUI=1` to get plain help output instead.
+Running bare `selfhost` on a terminal opens the welcome screen too. Press q to quit. Set `SELFHOSTDEV_NO_TUI=1` to get plain help output instead.
 
 ## Point it somewhere
 
@@ -34,7 +34,7 @@ selfhost --profile qa postgres list
 selfhost --base-url http://localhost:3000 postgres list
 ```
 
-Flags have env var equivalents: `SELFHOST_PROFILE`, `SELFHOST_BASE_URL`, `SELFHOST_ORG`.
+Flags have env var equivalents: `SELFHOSTDEV_PROFILE`, `SELFHOSTDEV_BASE_URL`, `SELFHOSTDEV_ORG`.
 
 Output is a table on a terminal and JSON when piped. Force it with `-o table|json|yaml` or `--json`. Sign in is not wired up yet, so authenticated commands still stop at `not implemented yet` and exit 1.
 

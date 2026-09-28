@@ -486,7 +486,7 @@ fn tui_help_lists_every_flag() {
 
 /// A bare `selfhost` under a non-TTY (assert_cmd pipes both streams) keeps the
 /// CLI's usage output and exits 2 — scripts and CI must never block on the TUI.
-/// The interactive-TTY path (stdin/stdout TTY, TERM not dumb, SELFHOST_NO_TUI
+/// The interactive-TTY path (stdin/stdout TTY, TERM not dumb, SELFHOSTDEV_NO_TUI
 /// unset) is pinned by the `should_launch_tui` unit matrix in `src/cli/tui.rs`,
 /// which cannot be exercised through a piped child process.
 #[test]
@@ -560,7 +560,7 @@ fn version_is_reported() {
 }
 
 /// `--env` is gone: profiles are the only context knob, so the help must not
-/// advertise the flag or a `SELFHOST_ENV` env var.
+/// advertise the flag or a `SELFHOSTDEV_ENV` env var.
 #[test]
 fn help_advertises_profiles_not_env() {
     let stdout = help_of("");
@@ -569,12 +569,12 @@ fn help_advertises_profiles_not_env() {
         "root help still mentions --env:\n{stdout}"
     );
     assert!(
-        !stdout.contains("SELFHOST_ENV"),
-        "root help still mentions SELFHOST_ENV:\n{stdout}"
+        !stdout.contains("SELFHOSTDEV_ENV"),
+        "root help still mentions SELFHOSTDEV_ENV:\n{stdout}"
     );
     assert!(
-        stdout.contains("--profile") && stdout.contains("SELFHOST_PROFILE"),
-        "root help must advertise --profile / SELFHOST_PROFILE:\n{stdout}"
+        stdout.contains("--profile") && stdout.contains("SELFHOSTDEV_PROFILE"),
+        "root help must advertise --profile / SELFHOSTDEV_PROFILE:\n{stdout}"
     );
 }
 

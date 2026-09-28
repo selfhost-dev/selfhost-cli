@@ -110,7 +110,7 @@ pub struct GlobalArgs {
         short = 'p',
         long,
         global = true,
-        env = "SELFHOST_PROFILE",
+        env = "SELFHOSTDEV_PROFILE",
         hide_env_values = true,
         value_name = "NAME",
         help_heading = "Global options"
@@ -121,7 +121,7 @@ pub struct GlobalArgs {
     #[arg(
         long = "base-url",
         global = true,
-        env = "SELFHOST_BASE_URL",
+        env = "SELFHOSTDEV_BASE_URL",
         hide_env_values = true,
         value_name = "URL",
         help_heading = "Global options"
@@ -132,7 +132,7 @@ pub struct GlobalArgs {
     #[arg(
         long,
         global = true,
-        env = "SELFHOST_ORG",
+        env = "SELFHOSTDEV_ORG",
         hide_env_values = true,
         value_name = "SLUG|PID",
         help_heading = "Global options"
@@ -521,8 +521,8 @@ pub struct UserCreateArgs {
     #[arg(long)]
     pub name: String,
 
-    /// Password (generated when omitted). Prefer SELFHOST_DB_PASSWORD; flag values stay visible in shell history and the process list.
-    #[arg(long, env = "SELFHOST_DB_PASSWORD", hide_env_values = true)]
+    /// Password (generated when omitted). Prefer SELFHOSTDEV_DB_PASSWORD; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOSTDEV_DB_PASSWORD", hide_env_values = true)]
     pub password: Option<String>,
 }
 
@@ -546,8 +546,8 @@ pub struct UserUpdateArgs {
     #[arg(long)]
     pub name: Option<String>,
 
-    /// New password. Prefer SELFHOST_DB_PASSWORD; flag values stay visible in shell history and the process list.
-    #[arg(long, env = "SELFHOST_DB_PASSWORD", hide_env_values = true)]
+    /// New password. Prefer SELFHOSTDEV_DB_PASSWORD; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOSTDEV_DB_PASSWORD", hide_env_values = true)]
     pub password: Option<String>,
 
     /// New role (e.g. readonly)
@@ -599,11 +599,11 @@ mod user_secret_tests {
 
     #[test]
     fn database_password_env_fallback_parses() {
-        unsafe { std::env::set_var("SELFHOST_DB_PASSWORD", "env-canary-password") };
+        unsafe { std::env::set_var("SELFHOSTDEV_DB_PASSWORD", "env-canary-password") };
         let probe = CreateProbe::try_parse_from(["probe", "pg-1", "--name", "app"])
             .expect("env fallback must parse");
         assert_eq!(probe.args.password.as_deref(), Some("env-canary-password"));
-        unsafe { std::env::remove_var("SELFHOST_DB_PASSWORD") };
+        unsafe { std::env::remove_var("SELFHOSTDEV_DB_PASSWORD") };
     }
 }
 
@@ -918,7 +918,7 @@ fn help_trailer(command: &clap::Command) -> String {
          selfhost deploy trigger acme-api --branch main --follow\n  \
          selfhost tui   # open the interactive terminal UI\n\n\
          Run selfhost with no arguments to open the interactive terminal UI\n  \
-         (same as selfhost tui). Set SELFHOST_NO_TUI=1 to print help instead.",
+         (same as selfhost tui). Set SELFHOSTDEV_NO_TUI=1 to print help instead.",
     );
     trailer
 }

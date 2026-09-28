@@ -87,7 +87,7 @@ pub fn run(args: TuiArgs) -> Result<()> {
 // All four guards must hold:
 // * stdin and stdout are terminals — a pipe or redirect means a script;
 // * `TERM` is not `dumb` — a dumb terminal cannot drive a full-screen UI;
-// * `SELFHOST_NO_TUI` is unset or empty — the explicit opt-out for scripts,
+// * `SELFHOSTDEV_NO_TUI` is unset or empty — the explicit opt-out for scripts,
 //   editors and CI that happen to run on a TTY.
 //
 // An unset `TERM` is allowed: the TTY check has already established an
@@ -115,7 +115,7 @@ mod tests {
         assert!(launch(true, true, Some("xterm-256color"), None));
         // `TERM` unset is still allowed once both streams are TTYs.
         assert!(launch(true, true, None, None));
-        // An empty SELFHOST_NO_TUI is not a set value.
+        // An empty SELFHOSTDEV_NO_TUI is not a set value.
         assert!(launch(true, true, Some("xterm"), Some("")));
     }
 
