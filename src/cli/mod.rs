@@ -92,17 +92,6 @@ macro_rules! stub_group {
 
 pub(crate) use stub_group;
 
-// Built-in `--env` shorthands, equivalent to the profiles of the same name (§5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum EnvKind {
-    /// Production (api.selfhost.dev)
-    Prod,
-    /// QA (qapi.selfhost.dev)
-    Qa,
-    /// Local development stack (localhost:3000)
-    Local,
-}
-
 // Cloud a database instance is provisioned on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Provider {
@@ -137,16 +126,6 @@ pub struct GlobalArgs {
         help_heading = "Global options"
     )]
     pub base_url: Option<String>,
-
-    /// Use one of the built-in environments instead of a saved profile
-    #[arg(
-        long,
-        global = true,
-        value_enum,
-        value_name = "ENV",
-        help_heading = "Global options"
-    )]
-    pub env: Option<EnvKind>,
 
     /// Organization slug or pid (default: the profile's organization)
     #[arg(
@@ -867,7 +846,7 @@ fn help_trailer(command: &clap::Command) -> String {
     trailer.push_str(
         "\n\nExamples:\n  \
          selfhost auth login                              # sign in to the default profile\n  \
-         selfhost --env qa postgres list --format json    # list QA PostgreSQL databases\n  \
+         selfhost --profile qa postgres list --format json # list QA PostgreSQL databases\n  \
          selfhost postgres create --provider hetzner --name pg-staging --ha\n  \
          selfhost project db create postgres --project acme-api --name app-db\n  \
          selfhost deploy trigger acme-api --branch main --follow",

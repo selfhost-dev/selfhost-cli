@@ -465,3 +465,34 @@ fn version_is_reported() {
         .success()
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
+
+/// `--env` is gone: profiles are the only context knob, so the help must not
+/// advertise the flag or a `SELFHOST_ENV` env var.
+#[test]
+fn help_advertises_profiles_not_env() {
+    let stdout = help_of("");
+    assert!(
+        !stdout.contains("--env"),
+        "root help still mentions --env:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("SELFHOST_ENV"),
+        "root help still mentions SELFHOST_ENV:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--profile") && stdout.contains("SELFHOST_PROFILE"),
+        "root help must advertise --profile / SELFHOST_PROFILE:\n{stdout}"
+    );
+}
+
+/// The removed flag is rejected as an unknown argument (usage error, exit 2)
+/// rather than silently accepted.
+#[test]
+fn env_flag_is_rejected() {
+    selfhost()
+        .args(["--env", "qa", "postgres", "list"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("--env"));
+}
