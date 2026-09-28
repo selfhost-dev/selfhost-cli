@@ -47,6 +47,12 @@ documented command surface with real clap subcommands and implements exactly:
   75 rate-limited)
 - the `config` module's serde types for the profile store (types only)
 
+The help surface is part of the product, not a debug dump: every command carries a
+one-line `about`, each engine group advertises exactly the verbs the platform supports
+for it (design §3 table), and the `--help` trailer is generated from the registered tree
+by `cli::help_trailer` so it can never claim a verb an engine group lacks.
+`tests/cli_surface.rs` pins all three.
+
 ## Deferred
 
 Everything else. Every command that has no implementation yet returns

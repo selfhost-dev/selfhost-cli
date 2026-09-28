@@ -11,11 +11,11 @@ pub struct CredentialAddArgs {
     #[arg(long, value_enum)]
     pub provider: Option<Provider>,
 
-    /// Provider access key id
+    /// Access key id
     #[arg(long = "access-key")]
     pub access_key: Option<String>,
 
-    /// Provider secret access key
+    /// Secret access key
     #[arg(long = "secret-key")]
     pub secret_key: Option<String>,
 }
@@ -26,11 +26,11 @@ pub struct CredentialUpdateArgs {
     /// Credential id
     pub id: Option<String>,
 
-    /// Provider access key id
+    /// Access key id
     #[arg(long = "access-key")]
     pub access_key: Option<String>,
 
-    /// Provider secret access key
+    /// Secret access key
     #[arg(long = "secret-key")]
     pub secret_key: Option<String>,
 }
@@ -43,29 +43,35 @@ pub struct CredentialRefArgs {
 }
 
 stub_group!(
-    /// `cloud credential` — provider credentials.
+    /// Credentials SelfHost uses in your cloud account
     CloudCredentialCommand, "cloud credential",
     leaves {
+        /// List credentials
         List(NoArgs) => "list",
+        /// Add credentials
         Add(CredentialAddArgs) => "add",
+        /// Change credentials
         Update(CredentialUpdateArgs) => "update",
+        /// Delete credentials
         Delete(CredentialRefArgs) => "delete",
+        /// Make a credential the default
         Default(CredentialRefArgs) => "default",
     }
     groups {}
 );
 
 stub_group!(
-    /// `cloud account` — provider account info.
+    /// Details of your cloud account
     CloudAccountCommand, "cloud account",
     leaves {
+        /// Show your cloud account
         Show(NoArgs) => "show",
     }
     groups {}
 );
 
 stub_group!(
-    /// Cloud credentials and the default provider.
+    /// Cloud provider credentials and the default provider
     CloudCommand, "cloud",
     leaves {
     }

@@ -10,15 +10,15 @@ pub struct PolicyArgs {
     /// Policy name
     pub name: Option<String>,
 
-    /// Minimum replica count
+    /// Smallest replica count to keep
     #[arg(long)]
     pub min: Option<u32>,
 
-    /// Maximum replica count
+    /// Largest replica count to allow
     #[arg(long)]
     pub max: Option<u32>,
 
-    /// Metric driving the policy
+    /// Metric that drives the policy
     #[arg(long)]
     pub metric: Option<String>,
 }
@@ -26,7 +26,7 @@ pub struct PolicyArgs {
 // `scaling capacity …`.
 #[derive(Debug, Clone, Args)]
 pub struct CapacityArgs {
-    /// Instance or group to plan for
+    /// Database or group to plan for
     pub target: Option<String>,
 
     /// Region
@@ -39,24 +39,32 @@ pub struct CapacityArgs {
 }
 
 stub_group!(
-    /// `scaling capacity` — ladders and scale plans.
+    /// How far a database can grow
     ScalingCapacityCommand, "scaling capacity",
     leaves {
+        /// Show the available instance sizes
         Ladder(CapacityArgs) => "ladder",
+        /// Show the capacity settings
         Config(CapacityArgs) => "config",
+        /// Show the current scale plan
         Plan(CapacityArgs) => "plan",
     }
     groups {}
 );
 
 stub_group!(
-    /// Scaling policies; capacity ladders and scale plans.
+    /// Scaling policies, capacity ladders and scale plans
     ScalingCommand, "scaling",
     leaves {
+        /// List policies
         List(NoArgs) => "list",
+        /// Show one policy
         Show(TargetArgs) => "show",
+        /// Create a policy
         Create(PolicyArgs) => "create",
+        /// Change a policy
         Update(PolicyArgs) => "update",
+        /// Delete a policy
         Delete(TargetArgs) => "delete",
     }
     groups {

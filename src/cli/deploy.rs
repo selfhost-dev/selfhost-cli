@@ -8,11 +8,11 @@ use super::*;
 // `deploy create` — connect a repo (the GitHub half lives in `github`).
 #[derive(Debug, Clone, Args)]
 pub struct DeployCreateArgs {
-    /// Owning project
+    /// Project the deployment belongs to
     #[arg(long)]
     pub project: Option<String>,
 
-    /// Repository (`owner/name`)
+    /// Repository to deploy (owner/name)
     #[arg(long)]
     pub repo: Option<String>,
 
@@ -20,7 +20,7 @@ pub struct DeployCreateArgs {
     #[arg(long)]
     pub branch: Option<String>,
 
-    /// Deployment name
+    /// Name for the deployment
     #[arg(long)]
     pub name: Option<String>,
 }
@@ -28,14 +28,14 @@ pub struct DeployCreateArgs {
 // `deploy trigger` — start a run (optionally streaming its build log).
 #[derive(Debug, Clone, Args)]
 pub struct DeployTriggerArgs {
-    /// Deployment/repo to trigger
+    /// Deployment to deploy
     pub target: Option<String>,
 
     /// Branch to build
     #[arg(long)]
     pub branch: Option<String>,
 
-    /// Follow the build log until the run ends
+    /// Keep streaming the build log until the run ends
     #[arg(long)]
     pub follow: bool,
 }
@@ -82,75 +82,102 @@ pub struct NotifyBindArgs {
 }
 
 stub_group!(
-    /// `deploy runs` — build runs and their logs.
+    /// Builds of a deployment
     DeployRunsCommand, "deploy runs",
     leaves {
+        /// List runs
         List(OptionalTargetArgs) => "list",
+        /// Show a run's build log
         Logs(LogsArgs) => "logs",
+        /// Deploy the current commit again
         Redeploy(TargetArgs) => "redeploy",
+        /// Roll back to an earlier run
         Rollback(TargetArgs) => "rollback",
     }
     groups {}
 );
 
 stub_group!(
-    /// `deploy env` — environment variables.
+    /// Environment variables
     DeployEnvCommand, "deploy env",
     leaves {
+        /// List variables
         List(OptionalTargetArgs) => "list",
+        /// Set a variable
         Set(EnvSetArgs) => "set",
+        /// Add several variables at once
         Merge(EnvSetArgs) => "merge",
+        /// Delete a variable
         Unset(EnvUnsetArgs) => "unset",
+        /// Detect variables from the repository
         Detect(OptionalTargetArgs) => "detect",
     }
     groups {}
 );
 
 stub_group!(
-    /// `deploy domain` — deployment domains.
+    /// Domains served by a deployment
     DeployDomainCommand, "deploy domain",
     leaves {
+        /// List domains
         List(OptionalTargetArgs) => "list",
+        /// Add a domain
         Add(DomainRefArgs) => "add",
+        /// Remove a domain
         Remove(DomainRefArgs) => "remove",
+        /// Check a domain's DNS
         Verify(DomainRefArgs) => "verify",
+        /// Re-sync domains with the platform
         Sync(OptionalTargetArgs) => "sync",
     }
     groups {}
 );
 
 stub_group!(
-    /// `deploy notify` — deployment notifications.
+    /// Who gets told about deploys
     DeployNotifyCommand, "deploy notify",
     leaves {
+        /// List notification bindings
         List(OptionalTargetArgs) => "list",
+        /// Notify a channel about an event
         Bind(NotifyBindArgs) => "bind",
+        /// Stop notifying a channel
         Unbind(NotifyBindArgs) => "unbind",
     }
     groups {}
 );
 
 stub_group!(
-    /// `deploy build-config` — build settings.
+    /// How the repository is built
     DeployBuildConfigCommand, "deploy build-config",
     leaves {
+        /// Show the build settings
         Get(OptionalTargetArgs) => "get",
+        /// Change the build settings
         Set(OptionalTargetArgs) => "set",
     }
     groups {}
 );
 
 stub_group!(
-    /// GitHub repo deployments: deploy, runs, logs, env vars, domains.
+    /// Deploy a GitHub repository and manage runs, env vars and domains
     DeployCommand, "deploy",
     leaves {
+        /// Connect a repository for deployment
         Create(DeployCreateArgs) => "create",
+        /// List deployments
         List(NoArgs) => "list",
+        /// Show one deployment
         Show(TargetArgs) => "show",
+        /// Change a deployment's settings
         Update(TargetArgs) => "update",
+        /// Delete a deployment
         Delete(TargetArgs) => "delete",
+        /// Start a deploy now
         Trigger(DeployTriggerArgs) => "trigger",
+        /// Cancel a running deploy
         Abort(TargetArgs) => "abort",
+        /// Check whether a deployment is healthy
         Health(TargetArgs) => "health",
     }
     groups {

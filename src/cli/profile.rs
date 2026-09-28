@@ -7,10 +7,10 @@ use super::*;
 // `profile add <name>` — the base URL comes from global `--base-url`/`--org`.
 #[derive(Debug, Clone, Args)]
 pub struct ProfileAddArgs {
-    /// Profile name
+    /// Name for the new profile
     pub name: String,
 
-    /// Console URL used for the browser-login hop
+    /// Console URL used for the browser sign-in step
     #[arg(long = "console-url")]
     pub console_url: Option<String>,
 }
@@ -18,10 +18,10 @@ pub struct ProfileAddArgs {
 // `profile set <name> <key> <value>`.
 #[derive(Debug, Clone, Args)]
 pub struct ProfileSetArgs {
-    /// Profile name
+    /// Profile to change
     pub name: String,
 
-    /// Field to set (`base_url`, `console_url`, `org`, `provider`)
+    /// Setting to write (base_url, console_url, org, provider)
     pub key: String,
 
     /// New value
@@ -29,14 +29,20 @@ pub struct ProfileSetArgs {
 }
 
 stub_group!(
-    /// Manage profiles — name, API base URL, console URL.
+    /// Manage saved profiles: API and console endpoints, default org
     ProfileCommand, "profile",
     leaves {
+        /// List your profiles
         List(NoArgs) => "list",
+        /// Show one profile
         Show(NameArgs) => "show",
+        /// Add a profile
         Add(ProfileAddArgs) => "add",
+        /// Delete a profile
         Remove(NameArgs) => "remove",
+        /// Make a profile the default
         Use(NameArgs) => "use",
+        /// Change one setting in a profile
         Set(ProfileSetArgs) => "set",
     }
     groups {}

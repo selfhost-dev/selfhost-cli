@@ -7,7 +7,7 @@ use super::*;
 // `webhook create|update`.
 #[derive(Debug, Clone, Args)]
 pub struct WebhookArgs {
-    /// Destination URL
+    /// Where to send the events
     #[arg(long)]
     pub url: Option<String>,
 
@@ -17,13 +17,18 @@ pub struct WebhookArgs {
 }
 
 stub_group!(
-    /// Organization webhook endpoints.
+    /// Webhook endpoints for your organization
     WebhookCommand, "webhook",
     leaves {
+        /// List endpoints
         List(NoArgs) => "list",
+        /// Show one endpoint
         Show(TargetArgs) => "show",
+        /// Add an endpoint
         Create(WebhookArgs) => "create",
+        /// Change an endpoint
         Update(WebhookArgs) => "update",
+        /// Delete an endpoint
         Delete(TargetArgs) => "delete",
     }
     groups {}

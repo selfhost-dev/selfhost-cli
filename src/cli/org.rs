@@ -18,64 +18,79 @@ pub struct OrgCreateArgs {
 // Members and invitations share this shape.
 #[derive(Debug, Clone, Args)]
 pub struct MemberArgs {
-    /// Member email
+    /// Email address of the person
     pub email: Option<String>,
 
-    /// Role to grant (`owner`, `admin`, `member`, `viewer`)
+    /// Role to grant (owner, admin, member, viewer)
     #[arg(long)]
     pub role: Option<String>,
 }
 
 stub_group!(
-    /// `org members` — membership management.
+    /// People in your organization and their roles
     OrgMembersCommand, "org members",
     leaves {
+        /// List members
         List(OptionalTargetArgs) => "list",
+        /// Add a member
         Add(MemberArgs) => "add",
+        /// Remove a member
         Remove(MemberArgs) => "remove",
+        /// Change a member's role
         UpdateRole(MemberArgs) => "update-role",
     }
     groups {}
 );
 
 stub_group!(
-    /// `org roles` — available roles.
+    /// Roles you can grant
     OrgRolesCommand, "org roles",
     leaves {
+        /// List roles
         List(NoArgs) => "list",
     }
     groups {}
 );
 
 stub_group!(
-    /// `org invites` — pending invitations.
+    /// Pending invitations
     OrgInvitesCommand, "org invites",
     leaves {
+        /// List pending invitations
         List(NoArgs) => "list",
+        /// Invite someone
         Create(MemberArgs) => "create",
+        /// Cancel an invitation
         Revoke(MemberArgs) => "revoke",
     }
     groups {}
 );
 
 stub_group!(
-    /// `org activity` — organization activity log.
+    /// What happened in your organization
     OrgActivityCommand, "org activity",
     leaves {
+        /// List recent activity
         List(ActivityListArgs) => "list",
     }
     groups {}
 );
 
 stub_group!(
-    /// Organizations, members, invitations, activity log.
+    /// Organizations, members, invitations and activity
     OrgCommand, "org",
     leaves {
+        /// List your organizations
         List(NoArgs) => "list",
+        /// Create an organization
         Create(OrgCreateArgs) => "create",
+        /// Show one organization
         Show(TargetArgs) => "show",
+        /// Change an organization's details
         Update(TargetArgs) => "update",
+        /// Delete an organization
         Delete(TargetArgs) => "delete",
+        /// Make an organization the default
         Use(NameArgs) => "use",
     }
     groups {

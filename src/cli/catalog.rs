@@ -7,7 +7,7 @@ use super::*;
 // `catalog instance-types --region`.
 #[derive(Debug, Clone, Args)]
 pub struct InstanceTypesArgs {
-    /// Region to list for
+    /// Region to list instance types for
     #[arg(long)]
     pub region: Option<String>,
 
@@ -23,7 +23,7 @@ pub struct EstimateArgs {
     #[arg(long = "instance-type")]
     pub instance_type: Option<String>,
 
-    /// Storage size, e.g. `100gb`
+    /// Storage size, e.g. 100gb
     #[arg(long)]
     pub size: Option<String>,
 
@@ -41,12 +41,16 @@ pub struct EstimateArgs {
 }
 
 stub_group!(
-    /// Regions, instance types, storage types, cost estimates.
+    /// Regions, instance types, storage types and cost estimates
     CatalogCommand, "catalog",
     leaves {
+        /// List available regions
         Regions(NoArgs) => "regions",
+        /// List instance types
         InstanceTypes(InstanceTypesArgs) => "instance-types",
+        /// List storage types
         StorageTypes(NoArgs) => "storage-types",
+        /// Estimate a database's monthly cost
         Estimate(EstimateArgs) => "estimate",
     }
     groups {}

@@ -10,7 +10,7 @@ use super::*;
 // `config set <key> <value>`.
 #[derive(Debug, Clone, Args)]
 pub struct ConfigSetArgs {
-    /// Default to write (`org`, `provider`, `format`, `timeout`)
+    /// Setting to write (org, provider, format, timeout)
     pub key: String,
 
     /// New value
@@ -18,13 +18,18 @@ pub struct ConfigSetArgs {
 }
 
 stub_group!(
-    /// Read/write defaults (org, provider, format, timeout).
+    /// Read and write your saved default settings
     ConfigCommand, "config",
     leaves {
+        /// List every saved setting
         List(NoArgs) => "list",
+        /// Show one saved setting
         Get(NameArgs) => "get",
+        /// Change one saved setting
         Set(ConfigSetArgs) => "set",
+        /// Remove a saved setting
         Unset(NameArgs) => "unset",
+        /// Print where settings are stored
         Path(NoArgs) => "path",
     }
     groups {}

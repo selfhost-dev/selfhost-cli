@@ -1,10 +1,10 @@
 //! `help [COMMAND…]` — same as `<command> --help` (design §3, §6).
 
-use clap::{Args, Command, CommandFactory};
+use clap::{Args, Command};
 
 use crate::error::{Error, Result};
 
-use super::Cli;
+use super::command;
 
 // Arguments for `selfhost help`.
 #[derive(Debug, Clone, Args)]
@@ -20,7 +20,7 @@ pub struct HelpArgs {
 // clap's bare subcommand name: the Ruby CLI's "nested help drops the parent
 // namespace" drift is explicitly not inherited (design §2).
 pub fn run(args: HelpArgs) -> Result<()> {
-    let mut target = find(Cli::command(), &args.command).ok_or_else(|| {
+    let mut target = find(command(), &args.command).ok_or_else(|| {
         Error::Usage(format!(
             "unknown command: selfhost {}",
             args.command.join(" ")

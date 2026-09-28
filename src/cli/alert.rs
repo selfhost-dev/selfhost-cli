@@ -14,11 +14,11 @@ pub struct AlertRuleArgs {
     #[arg(long)]
     pub metric: Option<String>,
 
-    /// Threshold expression
+    /// Value that triggers the alert
     #[arg(long)]
     pub threshold: Option<String>,
 
-    /// Severity (`info`, `warning`, `critical`)
+    /// How serious it is (info, warning, critical)
     #[arg(long)]
     pub severity: Option<String>,
 }
@@ -29,7 +29,7 @@ pub struct AlertChannelArgs {
     /// Channel name
     pub name: Option<String>,
 
-    /// Channel kind (`slack`, `email`, `webhook`, `pagerduty`)
+    /// Where to send alerts (slack, email, webhook, pagerduty)
     #[arg(long)]
     pub kind: Option<String>,
 
@@ -39,45 +39,59 @@ pub struct AlertChannelArgs {
 }
 
 stub_group!(
-    /// `alert rules` — threshold rules.
+    /// When SelfHost should alert you
     AlertRulesCommand, "alert rules",
     leaves {
+        /// List rules
         List(NoArgs) => "list",
+        /// Show one rule
         Show(TargetArgs) => "show",
+        /// Create a rule
         Create(AlertRuleArgs) => "create",
+        /// Change a rule
         Update(AlertRuleArgs) => "update",
+        /// Delete a rule
         Delete(TargetArgs) => "delete",
     }
     groups {}
 );
 
 stub_group!(
-    /// `alert instances` — fired alerts.
+    /// Alerts that fired
     AlertInstancesCommand, "alert instances",
     leaves {
+        /// List fired alerts
         List(NoArgs) => "list",
+        /// Acknowledge an alert
         Ack(TargetArgs) => "ack",
+        /// Resolve an alert
         Resolve(TargetArgs) => "resolve",
     }
     groups {}
 );
 
 stub_group!(
-    /// `alert channels` — notification channels.
+    /// Where alerts are delivered
     AlertChannelsCommand, "alert channels",
     leaves {
+        /// List channels
         List(NoArgs) => "list",
+        /// Show one channel
         Show(TargetArgs) => "show",
+        /// Add a channel
         Create(AlertChannelArgs) => "create",
+        /// Change a channel
         Update(AlertChannelArgs) => "update",
+        /// Delete a channel
         Delete(TargetArgs) => "delete",
+        /// Send a test message
         Test(TargetArgs) => "test",
     }
     groups {}
 );
 
 stub_group!(
-    /// Alert rules, triggered instances, notification channels.
+    /// Alert rules, fired alerts and notification channels
     AlertCommand, "alert",
     leaves {
     }

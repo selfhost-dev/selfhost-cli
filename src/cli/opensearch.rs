@@ -1,127 +1,119 @@
-//! `opensearch` — managed OpenSearch clusters (design §4).
+//! `opensearch` — managed OpenSearch databases (design §4).
 //!
-//! Slice 0 registers the full surface: the shared instance verbs, `users`, `config`,
-//! `snapshots`, `backups`, `pitr`, `pool` and the engine-specific groups. Every handler
-//! answers `not implemented yet: opensearch …`.
+//! Slice 0 registers the shared instance verbs, `users`, `snapshots`, `backups` and
+//! `dashboards`. Every handler answers `not implemented yet: opensearch …`.
+//!
+//! OpenSearch reports `supports_config_tuning?` false, `supports_pitr?` false and no
+//! pooler, so `config`, `pitr` and `pool` are not registered. Dashboards is
+//! OpenSearch-only (`instances_controller.rb#dashboards`).
 
 use super::*;
 
 stub_group!(
-    /// `opensearch users` — database roles inside one instance.
+    /// Security-plugin users
     OpensearchUsersCommand, "opensearch users",
     leaves {
+        /// List users
         List(OptionalTargetArgs) => "list",
+        /// Create a user
         Create(UserCreateArgs) => "create",
+        /// Change a user's role
         Update(UserUpdateArgs) => "update",
+        /// Delete a user
         Delete(UserRefArgs) => "delete",
+        /// Replace a user's password
         RotatePassword(UserRefArgs) => "rotate-password",
     }
     groups {}
 );
 
 stub_group!(
-    /// `opensearch config` — engine parameters.
-    OpensearchConfigCommand, "opensearch config",
-    leaves {
-        Show(PidArgs) => "show",
-        Preview(PidArgs) => "preview",
-        Set(EngineConfigSetArgs) => "set",
-        RestartRequired(PidArgs) => "restart-required",
-    }
-    groups {}
-);
-
-stub_group!(
-    /// `opensearch snapshots` — provider snapshots.
+    /// Storage snapshots
     OpensearchSnapshotsCommand, "opensearch snapshots",
     leaves {
+        /// List snapshots
         List(OptionalTargetArgs) => "list",
+        /// Take a snapshot now
         Create(TargetArgs) => "create",
+        /// Restore a snapshot into a new database
         Restore(RestoreArgs) => "restore",
+        /// Delete a snapshot
         Delete(TargetArgs) => "delete",
     }
     groups {}
 );
 
 stub_group!(
-    /// `opensearch backups` — logical/provider backups.
+    /// Backups you can restore from
     OpensearchBackupsCommand, "opensearch backups",
     leaves {
+        /// List backups
         List(OptionalTargetArgs) => "list",
+        /// Create a backup now
         Create(TargetArgs) => "create",
+        /// Restore a backup into a new database
         Restore(RestoreArgs) => "restore",
+        /// Delete a backup
         Delete(TargetArgs) => "delete",
     }
     groups {}
 );
 
 stub_group!(
-    /// `opensearch pitr` — point-in-time recovery.
-    OpensearchPitrCommand, "opensearch pitr",
-    leaves {
-        Status(PitrArgs) => "status",
-        Enable(PitrArgs) => "enable",
-        Configure(PitrArgs) => "configure",
-        Pause(PitrArgs) => "pause",
-        Resume(PitrArgs) => "resume",
-        Retry(PitrArgs) => "retry",
-        Restore(PitrArgs) => "restore",
-    }
-    groups {}
-);
-
-stub_group!(
-    /// `opensearch pool` — connection pooler.
-    OpensearchPoolCommand, "opensearch pool",
-    leaves {
-        Show(PidArgs) => "show",
-        Enable(PidArgs) => "enable",
-        Disable(PidArgs) => "disable",
-        Update(PoolUpdateArgs) => "update",
-        ReloadUsers(PidArgs) => "reload-users",
-    }
-    groups {}
-);
-
-stub_group!(
-    /// `opensearch dashboards` — managed Dashboards.
+    /// OpenSearch Dashboards
     OpensearchDashboardsCommand, "opensearch dashboards",
     leaves {
+        /// Show the Dashboards address and status
         Show(PidArgs) => "show",
+        /// Turn Dashboards on
         Enable(PidArgs) => "enable",
+        /// Turn Dashboards off
         Disable(PidArgs) => "disable",
     }
     groups {}
 );
 
 stub_group!(
-    /// Managed OpenSearch clusters.
+    /// Managed OpenSearch databases
     OpensearchCommand, "opensearch",
     leaves {
+        /// List your OpenSearch databases
         List(EngineListArgs) => "list",
+        /// Show one OpenSearch database
         Show(TargetArgs) => "show",
+        /// Create an OpenSearch database
         Create(EngineCreateArgs) => "create",
+        /// Delete an OpenSearch database
         Delete(TargetArgs) => "delete",
+        /// Start a stopped database
         Start(TargetArgs) => "start",
+        /// Stop a running database
         Stop(TargetArgs) => "stop",
+        /// Reboot a database
         Reboot(TargetArgs) => "reboot",
+        /// Clone a database into a new one
         Fork(ForkArgs) => "fork",
+        /// Change the instance type or storage size
         Resize(ResizeArgs) => "resize",
+        /// Change how many replicas the database runs
         Scale(ScaleArgs) => "scale",
+        /// Promote another node of a high-availability database
         Failover(FailoverArgs) => "failover",
+        /// Change tags, public access and delete protection
         Update(UpdateArgs) => "update",
+        /// Wait until a database finishes provisioning
         Wait(WaitArgs) => "wait",
+        /// Show database logs
         Logs(LogsArgs) => "logs",
+        /// Show query and connection statistics
         Stats(PidArgs) => "stats",
+        /// Show CPU, memory and disk metrics
         Metrics(PidArgs) => "metrics",
     }
     groups {
         Users(OpensearchUsersCommand) => "users",
-        Config(OpensearchConfigCommand) => "config",
         Snapshots(OpensearchSnapshotsCommand) => "snapshots",
         Backups(OpensearchBackupsCommand) => "backups",
-        Pitr(OpensearchPitrCommand) => "pitr",
-        Pool(OpensearchPoolCommand) => "pool",
         Dashboards(OpensearchDashboardsCommand) => "dashboards",
     }
 );

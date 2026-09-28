@@ -3,38 +3,45 @@
 use super::*;
 
 stub_group!(
-    /// `ssh-key org` — organization keys.
+    /// SSH keys shared across your organization
     SshKeyOrgCommand, "ssh-key org",
     leaves {
+        /// List organization keys
         List(NoArgs) => "list",
+        /// Add an organization key
         Add(SshKeyAddArgs) => "add",
+        /// Remove an organization key
         Remove(TargetArgs) => "remove",
     }
     groups {}
 );
 
 stub_group!(
-    /// `ssh-key project` — project keys.
+    /// SSH keys that belong to one project
     SshKeyProjectCommand, "ssh-key project",
     leaves {
+        /// List project keys
         List(OptionalTargetArgs) => "list",
+        /// Add a project key
         Add(SshKeyAddArgs) => "add",
+        /// Remove a project key
         Remove(TargetArgs) => "remove",
     }
     groups {}
 );
 
 stub_group!(
-    /// `ssh-key access` — project SSH access.
+    /// Who may SSH into a project
     SshKeyAccessCommand, "ssh-key access",
     leaves {
+        /// Choose the access mode
         Set(AccessSetArgs) => "set",
     }
     groups {}
 );
 
 stub_group!(
-    /// Organization and project SSH keys, project SSH access.
+    /// SSH keys for your organization and projects
     SshKeyCommand, "ssh-key",
     leaves {
     }

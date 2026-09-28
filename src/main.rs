@@ -15,10 +15,17 @@ mod watch;
 
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::FromArgMatches;
 
 fn main() -> ExitCode {
-    let cli = cli::Cli::parse();
+    // [`cli::command`] is the derive-generated tree plus the generated help
+    // trailer and the unified options heading, so parsing goes through it
+    // rather than through `Cli::parse`.
+    let matches = cli::command().get_matches();
+    let cli = match cli::Cli::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
+    };
 
     match cli.run() {
         Ok(()) => ExitCode::SUCCESS,

@@ -8,7 +8,7 @@
 //! * adding a command: one line in the group's [`stub_group!`] call;
 //! * adding behaviour: a real arm in the group's dispatch, or a new group module.
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::output::Format;
 
@@ -95,48 +95,50 @@ pub(crate) use stub_group;
 // Built-in `--env` shorthands, equivalent to the profiles of the same name (§5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum EnvKind {
-    /// Production (`api.selfhost.dev`).
+    /// Production (api.selfhost.dev)
     Prod,
-    /// QA (`qapi.selfhost.dev`).
+    /// QA (qapi.selfhost.dev)
     Qa,
-    /// Local Rails console (`http://localhost:3000`).
+    /// Local development stack (localhost:3000)
     Local,
 }
 
 // Cloud a database instance is provisioned on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Provider {
-    /// AWS.
+    /// Amazon Web Services
     Aws,
-    /// Hetzner Cloud.
+    /// Hetzner Cloud
     Hetzner,
 }
 
 // Options accepted by every command, before or after the subcommand (design §3).
 #[derive(Debug, Clone, Args)]
 pub struct GlobalArgs {
-    /// Profile to use [default: "default"]
+    /// Saved profile to use
     #[arg(
         short = 'p',
         long,
         global = true,
         env = "SELFHOST_PROFILE",
+        hide_env_values = true,
         value_name = "NAME",
         help_heading = "Global options"
     )]
     pub profile: Option<String>,
 
-    /// API base URL [default: the profile's, else https://api.selfhost.dev]
+    /// API base URL (default: the profile's, or https://api.selfhost.dev)
     #[arg(
         long = "base-url",
         global = true,
         env = "SELFHOST_BASE_URL",
+        hide_env_values = true,
         value_name = "URL",
         help_heading = "Global options"
     )]
     pub base_url: Option<String>,
 
-    /// Shorthand for a built-in profile
+    /// Use one of the built-in environments instead of a saved profile
     #[arg(
         long,
         global = true,
@@ -146,17 +148,18 @@ pub struct GlobalArgs {
     )]
     pub env: Option<EnvKind>,
 
-    /// Organization (slug or pid) [default: the profile's org]
+    /// Organization slug or pid (default: the profile's organization)
     #[arg(
         long,
         global = true,
         env = "SELFHOST_ORG",
-        value_name = "SLUG",
+        hide_env_values = true,
+        value_name = "SLUG|PID",
         help_heading = "Global options"
     )]
     pub org: Option<String>,
 
-    /// Output format [default: table on TTY, json when piped]
+    /// How to print results (default: table in a terminal, json when piped)
     #[arg(
         short = 'o',
         long = "format",
@@ -167,15 +170,15 @@ pub struct GlobalArgs {
     )]
     pub format: Option<Format>,
 
-    /// Shorthand for --format json
+    /// Print JSON (same as --format json)
     #[arg(long, global = true, help_heading = "Global options")]
     pub json: bool,
 
-    /// Disable ANSI output
+    /// Turn off colored output
     #[arg(long = "no-color", global = true, help_heading = "Global options")]
     pub no_color: bool,
 
-    /// Overall request timeout
+    /// Seconds to wait for one API request before giving up
     #[arg(
         long,
         global = true,
@@ -185,7 +188,7 @@ pub struct GlobalArgs {
     )]
     pub timeout: u64,
 
-    /// Override the per-operation poll cadence
+    /// Seconds between progress checks while waiting for an operation
     #[arg(
         long = "poll-interval",
         global = true,
@@ -194,25 +197,48 @@ pub struct GlobalArgs {
     )]
     pub poll_interval: Option<u64>,
 
-    /// Assume yes; skips destructive confirmations
+    /// Answer yes to every confirmation prompt
     #[arg(short = 'y', long, global = true, help_heading = "Global options")]
     pub yes: bool,
 
-    /// Print the HTTP request without sending it
+    /// Show the API request instead of sending it
     #[arg(long = "dry-run", global = true, help_heading = "Global options")]
     pub dry_run: bool,
 
-    /// Errors only
+    /// Print errors only
     #[arg(short = 'q', long, global = true, help_heading = "Global options")]
     pub quiet: bool,
 
-    /// Show HTTP requests
+    /// Show API requests as they are made
     #[arg(short = 'v', long, global = true, help_heading = "Global options")]
     pub verbose: bool,
 
-    /// Show request/response bodies (secrets redacted)
+    /// Show full request and response details (secrets hidden)
     #[arg(long, global = true, help_heading = "Global options")]
     pub debug: bool,
+
+    // clap's built-in `-h`/`-V` flags have no heading of their own, which left
+    // a two-entry `Options:` block above the global wall. These replace them
+    // (the built-ins are disabled on the root) so every option in the help
+    // lands in one `Global options` block.
+    /// Print help
+    #[arg(
+        short = 'h',
+        long = "help",
+        global = true,
+        action = clap::ArgAction::Help,
+        help_heading = "Global options"
+    )]
+    pub help: Option<bool>,
+
+    /// Print version
+    #[arg(
+        short = 'V',
+        long = "version",
+        action = clap::ArgAction::Version,
+        help_heading = "Global options"
+    )]
+    pub version: Option<bool>,
 }
 
 // A command with no documented flags yet.
@@ -222,21 +248,21 @@ pub struct NoArgs {}
 // A single required positional: pid (`awsinst_*`), group id, or resource name.
 #[derive(Debug, Clone, Args)]
 pub struct TargetArgs {
-    /// Instance pid, group id or resource name
+    /// Database id, group id or name
     pub target: String,
 }
 
 // One optional positional — listings that can be scoped or left org-wide.
 #[derive(Debug, Clone, Args)]
 pub struct OptionalTargetArgs {
-    /// Instance pid, group id or resource name
+    /// Database id, group id or name
     pub target: Option<String>,
 }
 
 // A required instance pid, for the per-instance sub-resources.
 #[derive(Debug, Clone, Args)]
 pub struct PidArgs {
-    /// Instance pid (`awsinst_*`)
+    /// Database id (awsinst_…)
     pub pid: String,
 }
 
@@ -253,7 +279,7 @@ pub struct LogsArgs {
     /// Instance pid or run pid
     pub pid: String,
 
-    /// Log source (engine-specific, e.g. `postgres`, `pgbouncer`)
+    /// Log source (engine-specific, e.g. postgres or pgbouncer)
     #[arg(long)]
     pub source: Option<String>,
 
@@ -261,11 +287,11 @@ pub struct LogsArgs {
     #[arg(long)]
     pub follow: bool,
 
-    /// Number of tail lines
+    /// How many lines to show
     #[arg(long)]
     pub lines: Option<u32>,
 
-    /// Start time (RFC 3339 or relative like `1h`)
+    /// Start from this time (timestamp or something like 1h)
     #[arg(long)]
     pub since: Option<String>,
 }
@@ -317,7 +343,7 @@ pub struct SshKeyAddArgs {
     /// Key name
     pub name: Option<String>,
 
-    /// Public key body (`ssh-ed25519 AAAA…`) or a path to a `.pub` file
+    /// Public key text (ssh-ed25519 AAAA…) or a path to a .pub file
     #[arg(long = "public-key")]
     pub public_key: Option<String>,
 
@@ -332,7 +358,7 @@ pub struct AccessSetArgs {
     /// Project or instance to scope access to
     pub target: Option<String>,
 
-    /// Access mode (`all`, `bastion`, `read-only`, …)
+    /// Access mode (all, bastion, read-only, …)
     #[arg(long)]
     pub mode: Option<String>,
 }
@@ -356,27 +382,27 @@ pub struct EngineCreateArgs {
     #[arg(long)]
     pub name: Option<String>,
 
-    /// Engine version, e.g. `16`
+    /// Engine version, e.g. 16
     #[arg(long)]
     pub version: Option<String>,
 
-    /// Region, e.g. `us-east-1` / `fsn1`
+    /// Region, e.g. us-east-1 or fsn1
     #[arg(long)]
     pub region: Option<String>,
 
-    /// Instance type from `selfhost catalog instance-types`
+    /// Instance type (see selfhost catalog instance-types)
     #[arg(long = "instance-type")]
     pub instance_type: Option<String>,
 
-    /// Storage type from `selfhost catalog storage-types`
+    /// Storage type (see selfhost catalog storage-types)
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
 
-    /// Storage size, e.g. `100gb`
+    /// Storage size, e.g. 100gb
     #[arg(long)]
     pub size: Option<String>,
 
-    /// Cloud to provision on
+    /// Cloud to create the database on
     #[arg(long, value_enum)]
     pub provider: Option<Provider>,
 
@@ -418,7 +444,7 @@ pub struct ClickHouseCreateArgs {
     #[command(flatten)]
     pub base: EngineCreateArgs,
 
-    /// Storage mode (`local`, `s3`, …)
+    /// Storage mode (local, s3, …)
     #[arg(long = "storage-mode")]
     pub storage_mode: Option<String>,
 }
@@ -496,11 +522,11 @@ pub struct WaitArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Poll cadence in seconds (never below the API cooldowns)
+    /// Seconds between progress checks
     #[arg(long)]
     pub interval: Option<u64>,
 
-    /// Give up after this many seconds
+    /// Stop waiting after this many seconds
     #[arg(long)]
     pub timeout: Option<u64>,
 }
@@ -511,7 +537,7 @@ pub struct UserCreateArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Role name to create
+    /// Name for the new user
     #[arg(long)]
     pub name: String,
 
@@ -534,7 +560,7 @@ pub struct UserUpdateArgs {
     #[arg(long)]
     pub password: Option<String>,
 
-    /// New role attributes (e.g. `readonly`)
+    /// New role (e.g. readonly)
     #[arg(long)]
     pub role: Option<String>,
 }
@@ -545,7 +571,7 @@ pub struct UserRefArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Existing role name
+    /// User to change
     pub name: String,
 }
 
@@ -555,7 +581,7 @@ pub struct EngineConfigSetArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Parameter name, e.g. `max_connections`
+    /// Parameter name, e.g. max_connections
     pub key: String,
 
     /// New value
@@ -568,15 +594,15 @@ pub struct PitrArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Retention window in days (`configure`)
+    /// How many days of recovery to keep (configure)
     #[arg(long = "retention-days")]
     pub retention_days: Option<u32>,
 
-    /// Backup schedule window (`configure`)
+    /// When to take base backups (configure)
     #[arg(long)]
     pub schedule: Option<String>,
 
-    /// Point in time to restore to (`restore`)
+    /// Moment to restore to (restore)
     #[arg(long = "to-time")]
     pub to_time: Option<String>,
 }
@@ -587,7 +613,7 @@ pub struct PoolUpdateArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Pool size (pgbouncer `default_pool_size` / proxysql threads)
+    /// Pool size (PgBouncer default_pool_size or ProxySQL threads)
     #[arg(long)]
     pub size: Option<u32>,
 
@@ -599,7 +625,7 @@ pub struct PoolUpdateArgs {
 // `extensions enable <extension>`.
 #[derive(Debug, Clone, Args)]
 pub struct ExtensionEnableArgs {
-    /// Extension name, e.g. `pgvector`
+    /// Extension name, e.g. pgvector
     pub extension: String,
 
     /// Instance pid
@@ -639,113 +665,117 @@ pub struct ReplicaDeleteArgs {
     /// Instance pid
     pub pid: String,
 
-    /// Replica identifier
+    /// Replica to remove
     pub replica: String,
 }
 
 // Top-level command families (design §3, in documented order).
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    /// Sign in/out, inspect the session (browser OAuth, per profile)
+    /// Sign in, sign out and inspect the current session
     #[command(subcommand)]
     Auth(auth::AuthCommand),
 
-    /// Manage profiles — name, API base URL, console URL
+    /// Manage saved profiles: API and console endpoints, default org
     #[command(subcommand)]
     Profile(profile::ProfileCommand),
 
-    /// Read/write defaults (org, provider, format, timeout)
+    /// Read and write your saved default settings
     #[command(subcommand)]
     Config(config::ConfigCommand),
 
-    /// Organizations, members, invitations, activity log
+    /// Organizations, members, invitations and activity
     #[command(subcommand)]
     Org(org::OrgCommand),
 
-    /// Projects: in-project databases, services, backups, snapshots, SSH
+    /// Projects: their databases, services, backups, snapshots and SSH
     #[command(subcommand)]
     Project(project::ProjectCommand),
 
-    /// GitHub repo deployments: deploy, runs, logs, env vars, domains
+    /// Deploy a GitHub repository and manage runs, env vars and domains
     #[command(subcommand)]
     Deploy(deploy::DeployCommand),
 
-    /// GitHub installations, repo branches, build-config detection
+    /// Connect GitHub and inspect repository branches and build settings
     #[command(subcommand)]
     Github(github::GithubCommand),
 
-    /// Org-level custom domains and DNS verification
+    /// Custom domains for your organization and their DNS status
     #[command(subcommand)]
     Domain(domain::DomainCommand),
 
-    /// Managed PostgreSQL clusters (--provider aws|hetzner)
+    /// Managed PostgreSQL databases
     #[command(subcommand)]
     Postgres(postgres::PostgresCommand),
 
-    /// Managed MySQL clusters
+    /// Managed MySQL databases
     #[command(subcommand)]
     Mysql(mysql::MysqlCommand),
 
-    /// Managed MongoDB clusters
+    /// Managed MongoDB databases
     #[command(subcommand)]
     Mongo(mongo::MongoCommand),
 
-    /// Managed Redis clusters
+    /// Managed Redis databases
     #[command(subcommand)]
     Redis(redis::RedisCommand),
 
-    /// Managed ClickHouse clusters
+    /// Managed ClickHouse databases
     #[command(subcommand)]
     Clickhouse(clickhouse::ClickhouseCommand),
 
-    /// Managed OpenSearch clusters
+    /// Managed OpenSearch databases
     #[command(subcommand)]
     Opensearch(opensearch::OpensearchCommand),
 
-    /// Regions, instance types, storage types, cost estimates
+    /// Regions, instance types, storage types and cost estimates
     #[command(subcommand)]
     Catalog(catalog::CatalogCommand),
 
-    /// Wallet, top-ups, transactions, SKUs, auto-recharge
+    /// Wallet, top-ups, transactions and auto-recharge
     #[command(subcommand)]
     Billing(billing::BillingCommand),
 
-    /// Cloud credentials and the default provider
+    /// Cloud provider credentials and the default provider
     #[command(subcommand)]
     Cloud(cloud::CloudCommand),
 
-    /// VPCs, subnets, security groups
+    /// VPCs, subnets and security groups
     #[command(subcommand)]
     Network(network::NetworkCommand),
 
-    /// Organization and project SSH keys, project SSH access
+    /// SSH keys for your organization and projects
     #[command(name = "ssh-key")]
     #[command(subcommand)]
     SshKey(ssh_key::SshKeyCommand),
 
-    /// Alert rules, triggered instances, notification channels
+    /// Alert rules, fired alerts and notification channels
     #[command(subcommand)]
     Alert(alert::AlertCommand),
 
-    /// Scaling policies; capacity ladders and scale plans
+    /// Scaling policies, capacity ladders and scale plans
     #[command(subcommand)]
     Scaling(scaling::ScalingCommand),
 
-    /// Organization webhook endpoints
+    /// Webhook endpoints for your organization
     #[command(subcommand)]
     Webhook(webhook::WebhookCommand),
 
-    /// Same as `<command> --help`
+    /// Show help for a command
     Help(help::HelpArgs),
 
-    /// Print the full command tree (kept for agent workflows)
+    /// Print every command in the CLI as a tree
     Tree(NoArgs),
 
-    /// Generate shell completions (bash, zsh, fish)
+    /// Generate shell completions
     Completion(completion::CompletionArgs),
 }
 
 // Root parser: global options plus the command family (design §3).
+//
+// The help trailer is not an attribute: `after_help` is generated from the
+// registered command tree by [`command`], so the "every engine group supports"
+// line can never drift from the verbs the engine groups actually register.
 #[derive(Debug, Parser)]
 #[command(
     name = "selfhost",
@@ -755,8 +785,9 @@ pub enum Command {
     long_about = "selfhost — the SelfHost platform CLI\n\nManage servers, managed databases, projects and deployments on selfhost.dev.",
     override_usage = "selfhost [OPTIONS] <COMMAND> [ARGS]",
     disable_help_subcommand = true,
-    help_template = "{before-help}{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}{after-help}",
-    after_help = "Every engine group shares: list, show, create, delete, start, stop, reboot,\nfork, resize, scale, failover, update, wait, logs, stats, metrics, users,\nsnapshots, backups, pitr, pool, config.\n\nExamples:\n  selfhost auth login                         # browser OAuth for the default profile\n  selfhost --env qa postgres list --format json\n  selfhost postgres create --provider hetzner --name pg-staging --ha\n  selfhost project db create postgres --project acme-api --name app-db\n  selfhost deploy trigger acme-api --branch main --follow"
+    disable_help_flag = true,
+    disable_version_flag = true,
+    help_template = "{before-help}{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}{after-help}"
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -764,6 +795,84 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+// Engine groups whose shared surface the `--help` trailer summarises.
+const ENGINE_GROUPS: [&str; 6] = [
+    "postgres",
+    "mysql",
+    "mongo",
+    "redis",
+    "clickhouse",
+    "opensearch",
+];
+
+// Root command as the binary uses it: the derive-generated tree plus the
+// generated trailer.
+pub fn command() -> clap::Command {
+    let command = Cli::command();
+    let trailer = help_trailer(&command);
+    command.after_help(trailer)
+}
+
+// Verbs every engine group registers, in the order `postgres` declares them.
+//
+// Computed from the tree rather than hand-written: the trailer is true by
+// construction, and pruning an engine verb updates it automatically.
+fn shared_engine_verbs(command: &clap::Command) -> Vec<String> {
+    let mut groups = ENGINE_GROUPS.iter().filter_map(|name| {
+        command
+            .get_subcommands()
+            .find(|cmd| cmd.get_name() == *name)
+    });
+    let Some(first) = groups.next() else {
+        return Vec::new();
+    };
+    let mut shared: Vec<&str> = first
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .collect();
+    for group in groups {
+        let names: Vec<&str> = group
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .collect();
+        shared.retain(|verb| names.contains(verb));
+    }
+    shared.into_iter().map(str::to_owned).collect()
+}
+
+// Trailer under `selfhost --help`: what the engine groups have in common, where
+// `--provider` lives, and worked examples.
+fn help_trailer(command: &clap::Command) -> String {
+    let mut trailer = String::from(
+        "Managed databases:\n  \
+         Each engine group (postgres, mysql, mongo, redis, clickhouse, opensearch)\n  \
+         manages one engine. Pass --provider aws|hetzner to create and list to\n  \
+         choose the cloud it runs on (default: your profile's provider).\n\n\
+         Every engine group supports:\n",
+    );
+    // Wrapped here rather than by clap, so the verb list breaks on a comma.
+    let mut line = String::from("  ");
+    for verb in shared_engine_verbs(command) {
+        let candidate = format!("{line}{verb},");
+        if candidate.len() > 74 {
+            trailer.push_str(line.trim_end_matches(' '));
+            trailer.push('\n');
+            line = String::from("  ");
+        }
+        line.push_str(&format!("{verb}, "));
+    }
+    trailer.push_str(line.trim_end_matches(", "));
+    trailer.push_str(
+        "\n\nExamples:\n  \
+         selfhost auth login                              # sign in to the default profile\n  \
+         selfhost --env qa postgres list --format json    # list QA PostgreSQL databases\n  \
+         selfhost postgres create --provider hetzner --name pg-staging --ha\n  \
+         selfhost project db create postgres --project acme-api --name app-db\n  \
+         selfhost deploy trigger acme-api --branch main --follow",
+    );
+    trailer
 }
 
 impl Cli {
