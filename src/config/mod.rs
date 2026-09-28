@@ -80,7 +80,7 @@ pub struct Config {
 }
 
 /// One named profile: where to talk, which org, and how to authenticate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Profile {
     /// API base URL, e.g. `https://api.selfhost.dev`.
     pub base_url: String,
@@ -102,6 +102,25 @@ pub struct Profile {
     /// When the credentials were last written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved_at: Option<DateTime<Utc>>,
+}
+impl std::fmt::Debug for Profile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Profile")
+            .field("base_url", &self.base_url)
+            .field("console_url", &self.console_url)
+            .field("org", &self.org)
+            .field("provider", &self.provider)
+            .field(
+                "firebase_api_key",
+                &self.firebase_api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "firebase_refresh_token",
+                &self.firebase_refresh_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("saved_at", &self.saved_at)
+            .finish()
+    }
 }
 
 impl Config {
@@ -154,5 +173,36 @@ mod tests {
                 "{name:?} must not resolve to a built-in"
             );
         }
+    }
+
+    fn canary_profile() -> Profile {
+        Profile {
+            base_url: PROD_BASE_URL.to_string(),
+            console_url: Some(PROD_CONSOLE_URL.to_string()),
+            org: Some("acme".to_string()),
+            provider: Some("aws".to_string()),
+            firebase_api_key: Some("canary-api-key-9f8e7d".to_string()),
+            firebase_refresh_token: Some("canary-refresh-token-1a2b3c".to_string()),
+            saved_at: None,
+        }
+    }
+
+    #[test]
+    fn debug_output_hides_profile_credentials() {
+        let shown = format!("{:?}", canary_profile());
+        assert!(!shown.contains("canary-api-key-9f8e7d"));
+        assert!(!shown.contains("canary-refresh-token-1a2b3c"));
+        assert!(shown.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn debug_output_hides_credentials_through_config() {
+        let mut store = Config::empty();
+        store
+            .profiles
+            .insert("default".to_string(), canary_profile());
+        let shown = format!("{store:?}");
+        assert!(!shown.contains("canary-api-key-9f8e7d"));
+        assert!(!shown.contains("canary-refresh-token-1a2b3c"));
     }
 }

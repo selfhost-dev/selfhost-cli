@@ -41,7 +41,7 @@ pub struct DeployTriggerArgs {
 }
 
 // `deploy env set|merge`.
-#[derive(Debug, Clone, Args)]
+#[derive(Clone, Args)]
 pub struct EnvSetArgs {
     /// Deployment or project
     pub target: Option<String>,
@@ -50,9 +50,19 @@ pub struct EnvSetArgs {
     #[arg(long)]
     pub key: Option<String>,
 
-    /// Variable value
-    #[arg(long)]
+    /// Variable value. Prefer SELFHOST_DEPLOY_ENV_VALUE; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOST_DEPLOY_ENV_VALUE", hide_env_values = true)]
     pub value: Option<String>,
+}
+
+impl std::fmt::Debug for EnvSetArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnvSetArgs")
+            .field("target", &self.target)
+            .field("key", &self.key)
+            .field("value", &self.value.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 // `deploy env unset`.
@@ -188,3 +198,35 @@ stub_group!(
         BuildConfig(DeployBuildConfigCommand) => "build-config",
     }
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct SetProbe {
+        #[command(flatten)]
+        args: EnvSetArgs,
+    }
+
+    #[test]
+    fn debug_output_hides_deploy_env_value() {
+        let args = EnvSetArgs {
+            target: Some("acme-api".to_string()),
+            key: Some("API_TOKEN".to_string()),
+            value: Some("canary-deploy-value-9a8b7c".to_string()),
+        };
+        let shown = format!("{args:?}");
+        assert!(!shown.contains("canary-deploy-value-9a8b7c"));
+        assert!(shown.contains("API_TOKEN"));
+    }
+
+    #[test]
+    fn deploy_env_value_env_fallback_parses() {
+        unsafe { std::env::set_var("SELFHOST_DEPLOY_ENV_VALUE", "env-canary-value") };
+        let probe = SetProbe::try_parse_from(["probe"]).expect("env fallback must parse");
+        assert_eq!(probe.args.value.as_deref(), Some("env-canary-value"));
+        unsafe { std::env::remove_var("SELFHOST_DEPLOY_ENV_VALUE") };
+    }
+}

@@ -512,7 +512,7 @@ pub struct WaitArgs {
 }
 
 // `users create <pid>`.
-#[derive(Debug, Clone, Args)]
+#[derive(Clone, Args)]
 pub struct UserCreateArgs {
     /// Instance pid
     pub pid: String,
@@ -521,13 +521,23 @@ pub struct UserCreateArgs {
     #[arg(long)]
     pub name: String,
 
-    /// Password (generated when omitted)
-    #[arg(long)]
+    /// Password (generated when omitted). Prefer SELFHOST_DB_PASSWORD; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOST_DB_PASSWORD", hide_env_values = true)]
     pub password: Option<String>,
 }
 
+impl std::fmt::Debug for UserCreateArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserCreateArgs")
+            .field("pid", &self.pid)
+            .field("name", &self.name)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
 // `users update <pid>`.
-#[derive(Debug, Clone, Args)]
+#[derive(Clone, Args)]
 pub struct UserUpdateArgs {
     /// Instance pid
     pub pid: String,
@@ -536,13 +546,65 @@ pub struct UserUpdateArgs {
     #[arg(long)]
     pub name: Option<String>,
 
-    /// New password
-    #[arg(long)]
+    /// New password. Prefer SELFHOST_DB_PASSWORD; flag values stay visible in shell history and the process list.
+    #[arg(long, env = "SELFHOST_DB_PASSWORD", hide_env_values = true)]
     pub password: Option<String>,
 
     /// New role (e.g. readonly)
     #[arg(long)]
     pub role: Option<String>,
+}
+
+impl std::fmt::Debug for UserUpdateArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserUpdateArgs")
+            .field("pid", &self.pid)
+            .field("name", &self.name)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("role", &self.role)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod user_secret_tests {
+    use super::*;
+
+    #[derive(Parser)]
+    struct CreateProbe {
+        #[command(flatten)]
+        args: UserCreateArgs,
+    }
+
+    #[test]
+    fn debug_output_hides_database_password() {
+        let create = UserCreateArgs {
+            pid: "pg-1".to_string(),
+            name: "app".to_string(),
+            password: Some("canary-db-password-3f4a5b".to_string()),
+        };
+        let shown = format!("{create:?}");
+        assert!(!shown.contains("canary-db-password-3f4a5b"));
+        assert!(shown.contains("pg-1"));
+
+        let update = UserUpdateArgs {
+            pid: "pg-1".to_string(),
+            name: Some("app".to_string()),
+            password: Some("canary-db-password-6c7d8e".to_string()),
+            role: None,
+        };
+        let shown = format!("{update:?}");
+        assert!(!shown.contains("canary-db-password-6c7d8e"));
+    }
+
+    #[test]
+    fn database_password_env_fallback_parses() {
+        unsafe { std::env::set_var("SELFHOST_DB_PASSWORD", "env-canary-password") };
+        let probe = CreateProbe::try_parse_from(["probe", "pg-1", "--name", "app"])
+            .expect("env fallback must parse");
+        assert_eq!(probe.args.password.as_deref(), Some("env-canary-password"));
+        unsafe { std::env::remove_var("SELFHOST_DB_PASSWORD") };
+    }
 }
 
 // `users delete|rotate-password` — an existing role.
