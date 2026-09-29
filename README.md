@@ -98,6 +98,7 @@ Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it
 | profile | Saved profiles: endpoints, default org |
 | config | Your saved default settings |
 | org | Organizations: create, list, show, update, delete, members, roles, invitations, activity |
+| api | Call any platform endpoint directly |
 | project | Projects with databases, services, backups |
 | deploy | Deploy a repo, watch runs, set env vars and domains |
 | github | Connected repos, branches, build settings |
@@ -116,6 +117,18 @@ Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it
 | completion | Shell completions for bash, zsh, fish |
 
 Every command takes the same global flags: `--profile`, `--base-url`, `--org`, `-o/--format`, `--json`, `--no-color`, `--timeout`, `--poll-interval`, `-y/--yes`, `--dry-run`, `-q/--quiet`, `-v/--verbose`, `--debug`.
+
+## Raw API access
+
+```sh
+selfhost api /organizations/{org}/members --org acme
+selfhost api -X GET /organizations -f per_page=50
+selfhost api -X PATCH /organizations/{org} -F description="Staging and demos"
+echo '{"description":"x"}' | selfhost api -X PATCH /organizations/{org} --input -
+selfhost api /organizations/{org} -i --format json
+```
+
+`api` calls any platform endpoint directly, with the profile's sign-in and organization handling, so it works under any profile. It defaults to GET and switches to POST when parameters or a body are present, unless a method is passed with `-X`. `-f` adds plain text parameters and `-F` adds typed ones (a value starting with `@` reads a file or stdin); on a GET they become query parameters, on a write they become the JSON body, and when `--input` sends a raw body from a file or stdin they move to the query instead. `{org}` in the path is filled in with the resolved organization. `-i` includes the status line and headers in the output; `--silent` prints nothing and leaves the exit code to say how it went. `-H` adds extra headers, except the ones the CLI manages itself (authorization, accept, content type, content length) — those fail the command instead of being overridden or silently dropped. Output and exit codes behave like every other command.
 
 ## License
 

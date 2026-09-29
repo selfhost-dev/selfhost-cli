@@ -128,7 +128,7 @@ fn cell(value: &Value) -> String {
 /// `U+2066..=U+2069`): they are not `Cc`, but they reorder the text around them
 /// and so spoof a table just as well. The directional marks `U+200E`/`U+200F`
 /// are legitimate and stay. JSON and YAML output stay byte-exact and skip this.
-pub(crate) fn strip_control_characters(text: &str) -> String {
+pub fn strip_control_characters(text: &str) -> String {
     text.chars()
         .filter(|character| {
             !character.is_control()

@@ -21,6 +21,7 @@ use crate::error::{Error, Result};
 use crate::output::Format;
 
 pub mod alert;
+pub mod api;
 pub mod auth;
 pub mod billing;
 pub mod catalog;
@@ -419,10 +420,17 @@ pub fn should_confirm(global: &GlobalArgs, command: &str) -> Result<bool> {
 /// before the confirmation gate, before a credential is read and before any
 /// request is sent, so the flag can never delete something by accident.
 pub fn reject_dry_run(global: &GlobalArgs) -> Result<()> {
+    reject_dry_run_for(global, "organization changes")
+}
+
+/// [`reject_dry_run`] with the thing the flag is refused for named for the
+/// reader: the raw `api` command reaches far more than organizations, so it
+/// says so instead of blaming a change it is not making.
+pub fn reject_dry_run_for(global: &GlobalArgs, subject: &str) -> Result<()> {
     if global.dry_run {
-        return Err(Error::Usage(
-            "dry runs are not supported for organization changes yet; nothing was sent".to_string(),
-        ));
+        return Err(Error::Usage(format!(
+            "dry runs are not supported for {subject} yet; nothing was sent"
+        )));
     }
     Ok(())
 }
@@ -1098,6 +1106,9 @@ pub enum Command {
     #[command(subcommand)]
     Webhook(webhook::WebhookCommand),
 
+    /// Call any platform endpoint directly
+    Api(api::ApiArgs),
+
     /// Open the interactive terminal UI
     Tui(tui::TuiArgs),
 
@@ -1228,6 +1239,7 @@ impl Cli {
         let Cli { global, command } = self;
 
         match command {
+            Command::Api(args) => block_on(api::run(&global, args)),
             Command::Tui(args) => tui::run(args),
             Command::Help(args) => help::run(args),
             Command::Tree(_) => tree::run(),

@@ -10,6 +10,7 @@ const TOP_LEVEL_GROUPS: &[&str] = &[
     "profile",
     "config",
     "org",
+    "api",
     "project",
     "deploy",
     "github",
@@ -411,6 +412,7 @@ fn tree_prints_the_command_tree() {
         .arg("tree")
         .assert()
         .success()
+        .stdout(predicate::str::contains("selfhost api"))
         .stdout(predicate::str::contains("selfhost postgres users"))
         .stdout(predicate::str::contains("selfhost postgres users list"))
         .stdout(predicate::str::contains(

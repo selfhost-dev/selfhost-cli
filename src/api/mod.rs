@@ -43,6 +43,27 @@ fn is_secret_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     SECRET_KEY_MARKERS.iter().any(|marker| key.contains(marker))
 }
+/// One raw request body for [`ApiClient::raw`]: a JSON value (organization
+/// injection applies) or bytes sent as-is with a JSON content type.
+#[derive(Debug, Clone)]
+pub enum RawBody {
+    /// A JSON body; objects gain `organization_id` like every other write.
+    Json(Value),
+    /// Bytes sent as-is (`--input`); the query carries the fields instead.
+    Raw(Vec<u8>),
+}
+
+/// One raw response: the status, the headers and the body text, so the caller
+/// can print the status line and headers (`-i`) or just the body.
+#[derive(Debug, Clone)]
+pub struct RawResponse {
+    /// The HTTP status.
+    pub status: reqwest::StatusCode,
+    /// Response headers as `name`/`value` pairs.
+    pub headers: Vec<(String, String)>,
+    /// The whole response body.
+    pub body: String,
+}
 
 // Slice 1 staging: the resource modules that call `ApiClient` land after the
 // auth slice, so until then nothing in the binary references it.
@@ -134,6 +155,162 @@ impl ApiClient {
     pub async fn delete(&self, path: &str, body: Value) -> Result<Value> {
         let body = self.scoped_body(body);
         self.request(Method::DELETE, path, &[], Some(&body)).await
+    }
+
+    /// One raw `api` call: any verb, owned query pairs, an optional [`RawBody`]
+    /// and extra headers. A `?` query already on `path` is preserved and the
+    /// owned pairs are merged into it; a JSON object body gains the injected
+    /// organization id like every other write, while raw bytes pass through
+    /// untouched. The full status, headers and body text come back unclassified
+    /// so the caller can print them (`-i`) or run [`classify_raw`].
+    pub async fn raw(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<RawBody>,
+        headers: &[(String, String)],
+    ) -> Result<RawResponse> {
+        let (path, embedded) = match path.split_once('?') {
+            Some((path, query)) => (path, Some(query)),
+            None => (path, None),
+        };
+        let scoped_body = body.map(|body| match body {
+            RawBody::Json(value) => RawBody::Json(self.scoped_body(value)),
+            raw => raw,
+        });
+        let encoded = scoped_body.as_ref().map(|body| match body {
+            RawBody::Json(value) => serde_json::to_vec(value).unwrap_or_default(),
+            RawBody::Raw(bytes) => bytes.clone(),
+        });
+        let mut retried = false;
+        loop {
+            let refs: Vec<(&str, &str)> = query
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            // An organization id already on the endpoint counts as explicit, like a
+            // field pair would: the profile's organization never overrides it.
+            let mut scoped_query = self.scoped_query(&refs);
+            if let Some(org) = self.org.as_deref()
+                && let Some(embedded) = embedded
+                && embedded
+                    .split('&')
+                    .filter_map(|pair| pair.split_once('='))
+                    .any(|(key, _)| key == "organization_id")
+            {
+                scoped_query.retain(|(key, value)| !(*key == "organization_id" && *value == org));
+            }
+            let mut url = self.build_url(path, &scoped_query)?;
+            if let Some(embedded) = embedded
+                && !embedded.is_empty()
+            {
+                let merged = match url.query() {
+                    Some(current) if !current.is_empty() => format!("{embedded}&{current}"),
+                    _ => embedded.to_string(),
+                };
+                url.set_query(Some(&merged));
+            }
+            self.echo_raw(&method, path, headers, encoded.as_deref());
+            let mut request = self
+                .http
+                .request(method.clone(), url.clone())
+                .bearer_auth(&self.token)
+                .header(ACCEPT, "application/json");
+            if let Some(bytes) = encoded.as_deref() {
+                request = request
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(bytes.to_vec());
+            }
+            for (name, value) in headers {
+                request = request.header(name.as_str(), value.as_str());
+            }
+
+            let response = request
+                .send()
+                .await
+                .map_err(|err| transport_error(path, err))?;
+            let status = response.status();
+            let retry_after = retry_after_secs(response.headers());
+            let response_headers = response
+                .headers()
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.as_str().to_owned(),
+                        String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                    )
+                })
+                .collect();
+            let text = response
+                .text()
+                .await
+                .map_err(|err| transport_error(path, err))?;
+
+            // A 429 is slept off and replayed exactly once, like [`Self::request`].
+            if status.as_u16() == 429 && !retried {
+                retried = true;
+                tokio::time::sleep(Duration::from_secs(retry_after)).await;
+                continue;
+            }
+            return Ok(RawResponse {
+                status,
+                headers: response_headers,
+                body: text,
+            });
+        }
+    }
+
+    /// `--verbose`/`--debug` echo for [`Self::raw`], to stderr: the method and
+    /// path, then debug header names only (`Name: [set]`) — never values, so a
+    /// header secret cannot leak — and the body when it parses as JSON
+    /// (redacted), or its byte length otherwise.
+    fn echo_raw(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &[(String, String)],
+        body: Option<&[u8]>,
+    ) {
+        for line in self.echo_raw_lines(method, path, headers, body) {
+            eprintln!("{line}");
+        }
+    }
+
+    /// The [`Self::echo_raw`] lines themselves.
+    fn echo_raw_lines(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &[(String, String)],
+        body: Option<&[u8]>,
+    ) -> Vec<String> {
+        if !self.verbose && !self.debug {
+            return Vec::new();
+        }
+        let mut lines = vec![format!("→ {method} {path}")];
+        if !self.debug {
+            return lines;
+        }
+        lines.push("  Authorization: Bearer [REDACTED]".to_string());
+        lines.push("  Accept: application/json".to_string());
+        for (name, _) in headers {
+            lines.push(format!("  {name}: [set]"));
+        }
+        if let Some(bytes) = body {
+            lines.push("  Content-Type: application/json".to_string());
+            match serde_json::from_slice::<Value>(bytes) {
+                Ok(mut value) => {
+                    redact_value(&mut value);
+                    lines.push(match serde_json::to_string_pretty(&value) {
+                        Ok(json) => json,
+                        Err(_) => "  <unprintable body>".to_string(),
+                    });
+                }
+                Err(_) => lines.push(format!("  <{} raw bytes>", bytes.len())),
+            }
+        }
+        lines
     }
 
     /// Append the organization id unless the caller already supplied one.
@@ -286,16 +463,57 @@ fn classify(status: reqwest::StatusCode, body: &str) -> Result<Value> {
     }
 }
 
+/// One classified raw body: envelope `data`, or raw text when the body is not
+/// JSON. `null` data prints as `null`, like the typed path's JSON.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RawData {
+    /// Envelope `data` (or `Null` for an empty JSON success body).
+    Json(Value),
+    /// A non-JSON body, printed as raw text.
+    Text(String),
+}
+
+/// [`classify`] for [`ApiClient::raw`]: the same envelope contract and error
+/// map (401, 402, 429, everything else with its HTTP code), except a success
+/// body that is not JSON comes back as [`RawData::Text`] instead of
+/// succeeding with `Null`.
+pub fn classify_raw(status: reqwest::StatusCode, body: &str) -> Result<RawData> {
+    if body.trim().is_empty() {
+        return classify(status, body).map(RawData::Json);
+    }
+    match serde_json::from_str::<Value>(body) {
+        Ok(Value::Object(_)) => classify(status, body).map(RawData::Json),
+        // Not the envelope shape (plain text, HTML, a bare array): errors with
+        // a status still classify, successes print the raw text.
+        Ok(_) => {
+            if status.is_success() {
+                Ok(RawData::Text(body.to_string()))
+            } else {
+                Err(classify(status, body).unwrap_err())
+            }
+        }
+        Err(_) => {
+            if status.is_success() {
+                Ok(RawData::Text(body.to_string()))
+            } else {
+                Err(classify(status, body).unwrap_err())
+            }
+        }
+    }
+}
+
 /// Message used when the error body carries no `message`: the HTTP status plus
-/// a one-line, length-capped snippet of whatever the server sent.
+/// a one-line, length-capped snippet of whatever the server sent. Control and
+/// bidi characters are stripped so a hostile body can never drive the terminal.
 fn snippet(status: reqwest::StatusCode, body: &str) -> String {
     let code = status.as_u16();
     let collapsed = body.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return format!("HTTP {code}");
     }
-    let mut snippet: String = collapsed.chars().take(ERROR_SNIPPET_CHARS).collect();
-    if collapsed.chars().count() > ERROR_SNIPPET_CHARS {
+    let stripped = crate::output::strip_control_characters(&collapsed);
+    let mut snippet: String = stripped.chars().take(ERROR_SNIPPET_CHARS).collect();
+    if stripped.chars().count() > ERROR_SNIPPET_CHARS {
         snippet.push('…');
     }
     format!("HTTP {code}: {snippet}")
@@ -419,6 +637,14 @@ mod tests {
         let text = snippet(status(500), &long);
         assert!(text.starts_with("HTTP 500: "));
         assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn error_snippets_drop_terminal_control_sequences() {
+        let text = snippet(status(500), "<html>\u{1b}]52;c;xyz\u{7}oops\u{202e}</html>");
+        assert!(!text.chars().any(|c| c.is_control()), "{text:?}");
+        assert!(!text.contains('\u{202e}'), "{text:?}");
+        assert!(text.contains("oops"), "{text:?}");
     }
 
     #[test]
@@ -736,5 +962,27 @@ mod tests {
             requests.contains(r#""role_pid":"role_admin""#),
             "{requests}"
         );
+    }
+    /// An `organization_id` already on a raw endpoint stays the only one: the
+    /// profile's organization never rides along with it.
+    #[tokio::test]
+    async fn live_raw_embedded_organization_id_wins_over_injection() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_1".to_string()));
+        api.raw(
+            reqwest::Method::GET,
+            "/organizations?organization_id=org_x",
+            &[],
+            None,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert_eq!(request.matches("organization_id=").count(), 1, "{request}");
+        assert!(request.contains("organization_id=org_x"), "{request}");
     }
 }
