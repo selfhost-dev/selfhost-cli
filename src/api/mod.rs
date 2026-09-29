@@ -116,6 +116,26 @@ impl ApiClient {
         self.request(Method::POST, path, &[], Some(&body)).await
     }
 
+    /// `PUT path` with `organization_id` inserted into an object body.
+    pub async fn put(&self, path: &str, body: Value) -> Result<Value> {
+        let body = self.scoped_body(body);
+        self.request(Method::PUT, path, &[], Some(&body)).await
+    }
+
+    /// `PATCH path` with `organization_id` inserted into an object body.
+    pub async fn patch(&self, path: &str, body: Value) -> Result<Value> {
+        let body = self.scoped_body(body);
+        self.request(Method::PATCH, path, &[], Some(&body)).await
+    }
+
+    /// `DELETE path` with a JSON body; the empty case is an empty object. The
+    /// body goes through [`Self::scoped_body`] like every other write, so the
+    /// routes that resolve their organization from the body still work.
+    pub async fn delete(&self, path: &str, body: Value) -> Result<Value> {
+        let body = self.scoped_body(body);
+        self.request(Method::DELETE, path, &[], Some(&body)).await
+    }
+
     /// Append the organization id unless the caller already supplied one.
     fn scoped_query<'a>(&'a self, query: &'a [(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
         let mut out = query.to_vec();
@@ -179,9 +199,7 @@ impl ApiClient {
                 .bearer_auth(&self.token)
                 .header(ACCEPT, "application/json");
             if let Some(body) = body {
-                request = request
-                    .header(CONTENT_TYPE, "application/json")
-                    .json(body);
+                request = request.header(CONTENT_TYPE, "application/json").json(body);
             }
 
             let response = request
@@ -287,7 +305,11 @@ fn snippet(status: reqwest::StatusCode, body: &str) -> String {
 /// everything else (absent, garbage, HTTP-date) falls back to
 /// [`DEFAULT_RETRY_AFTER_SECS`].
 fn retry_after_secs(headers: &HeaderMap) -> u64 {
-    parse_retry_after(headers.get(RETRY_AFTER).and_then(|value| value.to_str().ok()))
+    parse_retry_after(
+        headers
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok()),
+    )
 }
 
 /// [`retry_after_secs`] without the header lookup, for direct testing.
@@ -340,7 +362,8 @@ mod tests {
 
     #[test]
     fn success_envelope_returns_data() {
-        let body = r#"{"status":"success","data":{"id":7,"name":"pg"},"message":null,"status_code":200}"#;
+        let body =
+            r#"{"status":"success","data":{"id":7,"name":"pg"},"message":null,"status_code":200}"#;
         let data = classify(status(200), body).unwrap();
         assert_eq!(data["id"], 7);
         assert_eq!(data["name"], "pg");
@@ -411,7 +434,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(RETRY_AFTER, HeaderValue::from_static("7"));
         assert_eq!(retry_after_secs(&headers), 7);
-        assert_eq!(retry_after_secs(&HeaderMap::new()), DEFAULT_RETRY_AFTER_SECS);
+        assert_eq!(
+            retry_after_secs(&HeaderMap::new()),
+            DEFAULT_RETRY_AFTER_SECS
+        );
     }
 
     #[test]
@@ -523,7 +549,11 @@ mod tests {
 
         // Neither flag prints nothing.
         let silent = client("http://example.test");
-        assert!(silent.echo_lines(&Method::GET, "/v1/postgres", None).is_empty());
+        assert!(
+            silent
+                .echo_lines(&Method::GET, "/v1/postgres", None)
+                .is_empty()
+        );
     }
 
     fn http_response(status_line: &str, extra: &str, body: &str) -> String {
@@ -589,10 +619,12 @@ mod tests {
     #[tokio::test]
     async fn live_success_envelope_returns_data() {
         let body = r#"{"status":"success","data":{"id":1},"message":null,"status_code":200}"#;
-        let (base, captured) =
-            serve(vec![http_response("200 OK", "", body)]).await;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
 
-        let data = client(&base).get("/v1/postgres", &[("limit", "5")]).await.unwrap();
+        let data = client(&base)
+            .get("/v1/postgres", &[("limit", "5")])
+            .await
+            .unwrap();
         assert_eq!(data["id"], 1);
 
         let request = drain(&captured).join("");
@@ -609,14 +641,17 @@ mod tests {
     async fn live_rate_limit_is_retried_once_then_succeeds() {
         let limited = http_response("429 Too Many Requests", "Retry-After: 1\r\n", "");
         let body = r#"{"status":"success","data":{"ok":true},"message":null,"status_code":200}"#;
-        let (base, captured) =
-            serve(vec![limited, http_response("200 OK", "", body)]).await;
+        let (base, captured) = serve(vec![limited, http_response("200 OK", "", body)]).await;
 
         let data = client(&base).get("/v1/postgres", &[]).await.unwrap();
         assert_eq!(data["ok"], true);
 
         let requests = drain(&captured).join("");
-        assert_eq!(requests.matches("GET /v1/postgres").count(), 2, "{requests}");
+        assert_eq!(
+            requests.matches("GET /v1/postgres").count(),
+            2,
+            "{requests}"
+        );
     }
 
     #[tokio::test]
@@ -637,8 +672,69 @@ mod tests {
             .unwrap();
 
         let requests = drain(&captured).join("\n---\n");
-        assert!(requests.contains("GET /v1/postgres?organization_id=org_1"), "{requests}");
+        assert!(
+            requests.contains("GET /v1/postgres?organization_id=org_1"),
+            "{requests}"
+        );
         assert!(!requests.contains("/v1/me?organization_id"), "{requests}");
-        assert!(requests.contains(r#""organization_id":"org_1""#), "{requests}");
+        assert!(
+            requests.contains(r#""organization_id":"org_1""#),
+            "{requests}"
+        );
+    }
+
+    /// The three write methods reach the wire as their own verb and carry the
+    /// injected organization in the body, so the invitation routes that resolve
+    /// the organization from the body work.
+    #[tokio::test]
+    async fn live_put_patch_and_delete_use_their_verbs_and_bodies() {
+        let body = r#"{"status":"success","data":null,"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![
+            http_response("200 OK", "", body),
+            http_response("200 OK", "", body),
+            http_response("200 OK", "", body),
+        ])
+        .await;
+
+        let api = client(&base).with_org(Some("org_1".to_string()));
+        api.put(
+            "/organizations/org_1",
+            serde_json::json!({"organization": {"name": "Acme"}}),
+        )
+        .await
+        .unwrap();
+        api.patch(
+            "/organizations/org_1/members/user_1/role",
+            serde_json::json!({"role_pid": "role_admin"}),
+        )
+        .await
+        .unwrap();
+        api.delete("/organizations/org_1", serde_json::json!({}))
+            .await
+            .unwrap();
+
+        let requests = drain(&captured).join("\n---\n");
+        assert!(
+            requests.contains("PUT /organizations/org_1 HTTP/1.1"),
+            "{requests}"
+        );
+        assert!(
+            requests.contains("PATCH /organizations/org_1/members/user_1/role HTTP/1.1"),
+            "{requests}"
+        );
+        assert!(
+            requests.contains("DELETE /organizations/org_1 HTTP/1.1"),
+            "{requests}"
+        );
+        // Every write body is scoped, including DELETE's empty one.
+        assert_eq!(
+            requests.matches(r#""organization_id":"org_1""#).count(),
+            3,
+            "{requests}"
+        );
+        assert!(
+            requests.contains(r#""role_pid":"role_admin""#),
+            "{requests}"
+        );
     }
 }

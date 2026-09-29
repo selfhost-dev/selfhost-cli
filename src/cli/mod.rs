@@ -8,9 +8,12 @@
 //! * adding a command: one line in the group's [`stub_group!`] call;
 //! * adding behaviour: a real arm in the group's dispatch, or a new group module.
 
+use std::io::{IsTerminal as _, Write as _};
+
 use anyhow::anyhow;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::Value;
+use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 use crate::api::ApiClient;
 use crate::config::{Profile, ProfileStore, validate_endpoint};
@@ -361,19 +364,21 @@ pub async fn unscoped_client(
         .with_verbosity(global.verbose, global.debug))
 }
 
-/// The client an org-scoped command works against, plus the pid it resolved:
-/// [`unscoped_client`] with [`org_reference`]'s organization injected into
-/// every scoped request, so `--org` / `SELFHOSTDEV_ORG` (then the profile's
-/// stored org) reach any command that inherits this path. `explicit` is the
-/// command's own positional argument, which wins over both. The injected value
-/// is always the resolved pid, never the slug. No reference anywhere fails
-/// before a credential is needed.
+/// The client an org-scoped command works against, plus the pid it resolved and
+/// the reference it resolved from: [`unscoped_client`] with [`org_reference`]'s
+/// organization injected into every scoped request, so `--org` /
+/// `SELFHOSTDEV_ORG` (then the profile's stored org) reach any command that
+/// inherits this path. `explicit` is the command's own positional argument,
+/// which wins over both. The injected value is always the resolved pid, never
+/// the slug. The reference comes back so a message can name the organization by
+/// the name the user used. No reference anywhere fails before a credential is
+/// needed.
 pub async fn org_client(
     store: &mut ProfileStore,
     name: &str,
     global: &GlobalArgs,
     explicit: Option<&str>,
-) -> Result<(ApiClient, String)> {
+) -> Result<(ApiClient, String, String)> {
     let reference = {
         let profile = store.require_profile(name)?;
         org_reference(explicit, global, profile).map(str::to_owned)
@@ -381,7 +386,81 @@ pub async fn org_client(
     let reference = reference.ok_or_else(no_organization_selected)?;
     let client = unscoped_client(store, name, global).await?;
     let pid = resolve_org_pid(&client, &reference).await?;
-    Ok((client.with_org(Some(pid.clone())), pid))
+    Ok((client.with_org(Some(pid.clone())), pid, reference))
+}
+
+/// Whether this run prints for a person: the table format, which is the default
+/// on a terminal. Commands that report one action print a single line for a
+/// person and a curated object in JSON/YAML.
+pub fn human_output(global: &GlobalArgs) -> bool {
+    Format::resolve(global.format, global.json) == Format::Table
+}
+
+/// Whether a destructive command has to ask the user to confirm. `--yes`
+/// answers the prompt up front, so a script says what it means; without it a run
+/// that has no terminal on stdin fails with the exact fix instead of hanging.
+/// The gate is the first thing such a command does, before a credential is read
+/// or a request is sent (design §6).
+pub fn should_confirm(global: &GlobalArgs, command: &str) -> Result<bool> {
+    if global.yes {
+        return Ok(false);
+    }
+    if std::io::stdin().is_terminal() {
+        return Ok(true);
+    }
+    Err(Error::Usage(format!(
+        "{command} needs confirmation; pass --yes to run it non-interactively"
+    )))
+}
+
+/// Refuse `--dry-run` on a mutating `org` verb. The global flag exists, but no
+/// organization change simulates its request yet, and a run that quietly sent
+/// the request anyway would be a false safety net. This fails closed instead,
+/// before the confirmation gate, before a credential is read and before any
+/// request is sent, so the flag can never delete something by accident.
+pub fn reject_dry_run(global: &GlobalArgs) -> Result<()> {
+    if global.dry_run {
+        return Err(Error::Usage(
+            "dry runs are not supported for organization changes yet; nothing was sent".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Ask the user to type `expected` back. `prompt` is printed verbatim, so the
+/// caller decides the wording. The answer counts only when it matches exactly
+/// once trimmed — and an empty or whitespace-only `expected` never matches:
+/// otherwise a bare Enter (or EOF, which reads as an empty line) would confirm.
+pub async fn confirm_typed(prompt: &str, expected: &str) -> bool {
+    let expected = expected.trim();
+    if expected.is_empty() {
+        return false;
+    }
+    eprint!("{prompt}");
+    let _ = std::io::stderr().flush();
+    read_confirmation().await.trim() == expected
+}
+
+/// Ask a yes/no question; only an explicit `y`/`yes` passes, so an interrupted
+/// or empty answer means no.
+pub async fn confirm_yes_no(question: &str) -> bool {
+    eprint!("{question} [y/N] ");
+    let _ = std::io::stderr().flush();
+    let answer = read_confirmation().await;
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// One line of confirmation input; EOF and read errors read as an empty line,
+/// which never confirms anything.
+async fn read_confirmation() -> String {
+    let mut answer = String::new();
+    match BufReader::new(tokio::io::stdin())
+        .read_line(&mut answer)
+        .await
+    {
+        Ok(read) if read > 0 => answer,
+        _ => String::new(),
+    }
 }
 
 // A command with no documented flags yet.
@@ -763,6 +842,22 @@ mod organization_pid_tests {
         assert_eq!(organization_pid(&json!({"id": overlong})), None);
         assert_eq!(organization_pid(&json!({"pid": ""})), None);
         assert_eq!(organization_pid(&json!({"pid": "org_a1"})), Some("org_a1"));
+    }
+}
+
+#[cfg(test)]
+mod confirmation_tests {
+    use super::*;
+
+    /// The typed confirmation exists to make a destructive verb deliberate. If
+    /// the phrase it compares against is empty, an EOF or a bare Enter reads as
+    /// an empty line and would confirm by accident, so an empty or
+    /// whitespace-only phrase never matches.
+    #[tokio::test]
+    async fn an_empty_or_whitespace_confirmation_phrase_never_confirms() {
+        assert!(!confirm_typed("type  to confirm: ", "").await);
+        assert!(!confirm_typed("type  to confirm: ", "   ").await);
+        assert!(!confirm_typed("type  to confirm: ", "\t\n").await);
     }
 }
 

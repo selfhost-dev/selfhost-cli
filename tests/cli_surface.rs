@@ -421,12 +421,12 @@ fn tree_prints_the_command_tree() {
 #[test]
 fn unimplemented_commands_report_their_full_path() {
     selfhost()
-        .args(["org", "invites", "list"])
+        .args(["project", "db", "list"])
         .assert()
         .failure()
         .code(1)
         .stderr(predicate::str::contains(
-            "not implemented yet: org invites list",
+            "not implemented yet: project db list",
         ));
 
     selfhost()
