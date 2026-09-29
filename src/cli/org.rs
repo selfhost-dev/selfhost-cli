@@ -232,7 +232,7 @@ async fn list(global: &GlobalArgs) -> Result<()> {
     let client = unscoped_client(&mut store, &name, global).await?;
 
     let selected = selected.as_deref().filter(|org| !org.is_empty());
-    let rows = membership_listing(&client, selected).await?;
+    let rows = membership_listing(&client, selected, &name).await?;
     print(global, &Value::Array(rows))
 }
 
@@ -242,7 +242,7 @@ async fn show(global: &GlobalArgs, args: &OrgTargetArgs) -> Result<()> {
     let name = store.resolved_name(global.profile.as_deref())?;
     let (client, pid) = org_client(&mut store, &name, global, args.target.as_deref()).await?;
 
-    let summary = organization_show(&client, &pid).await?;
+    let summary = organization_show(&client, &pid, &name).await?;
     print(global, &summary)
 }
 
@@ -311,17 +311,21 @@ async fn activity(global: &GlobalArgs, args: &OrgActivityArgs) -> Result<()> {
 
 /// `GET /users/memberships` — unscoped, because the listing is exactly the
 /// caller's identity view and has to work when the stored org is gone.
-async fn membership_listing(client: &ApiClient, selected: Option<&str>) -> Result<Vec<Value>> {
+async fn membership_listing(
+    client: &ApiClient,
+    selected: Option<&str>,
+    profile: &str,
+) -> Result<Vec<Value>> {
     let memberships = client.get_unscoped("/users/memberships", &[]).await?;
     let organizations = client.get_unscoped("/organizations", &[]).await?;
     let memberships = with_organization_slugs(&memberships, &organizations);
-    Ok(membership_rows(&memberships, selected))
+    Ok(membership_rows(&memberships, selected, profile))
 }
 
 /// `GET /organizations/:pid`, curated for `org show`.
-async fn organization_show(client: &ApiClient, pid: &str) -> Result<Value> {
+async fn organization_show(client: &ApiClient, pid: &str, profile: &str) -> Result<Value> {
     let organization = client.get(&format!("/organizations/{pid}"), &[]).await?;
-    Ok(organization_summary(&organization))
+    Ok(organization_summary(&organization, profile))
 }
 
 /// `GET /organizations/:pid/members`.
@@ -392,13 +396,13 @@ fn with_organization_slugs(memberships: &Value, organizations: &Value) -> Value 
 }
 
 /// `org list` rows: one per membership, one per pending invitation.
-fn membership_rows(memberships: &Value, selected: Option<&str>) -> Vec<Value> {
+fn membership_rows(memberships: &Value, selected: Option<&str>, profile: &str) -> Vec<Value> {
     memberships
         .as_array()
         .map(|entries| {
             entries
                 .iter()
-                .filter_map(|entry| membership_row(entry, selected))
+                .filter_map(|entry| membership_row(entry, selected, profile))
                 .collect()
         })
         .unwrap_or_default()
@@ -406,8 +410,9 @@ fn membership_rows(memberships: &Value, selected: Option<&str>) -> Vec<Value> {
 
 /// One membership or pending invitation. The organization marks the row the
 /// profile already points at; a pending invitation carries `invited` where a
-/// membership carries `joined`.
-fn membership_row(entry: &Value, selected: Option<&str>) -> Option<Value> {
+/// membership carries `joined`. The profile the command ran with is named on
+/// every row, membership or invitation.
+fn membership_row(entry: &Value, selected: Option<&str>, profile: &str) -> Option<Value> {
     let organization = entry.get("organization")?;
     let slug = organization.get("slug").and_then(Value::as_str);
     let name = organization
@@ -448,6 +453,7 @@ fn membership_row(entry: &Value, selected: Option<&str>) -> Option<Value> {
     {
         row.insert("joined".to_string(), Value::String(joined.to_string()));
     }
+    row.insert("profile".to_string(), Value::String(profile.to_string()));
     Some(Value::Object(row))
 }
 
@@ -465,8 +471,9 @@ const SUMMARY_FIELDS: [&str; 9] = [
     "max_members",
 ];
 
-/// The curated `org show` object: only known fields that are actually set.
-fn organization_summary(organization: &Value) -> Value {
+/// The curated `org show` object: only known fields that are actually set, plus
+/// the profile the command ran with — a local fact, never the server payload's.
+fn organization_summary(organization: &Value, profile: &str) -> Value {
     let mut summary = Map::new();
     for field in SUMMARY_FIELDS {
         let value = if field == "pid" {
@@ -481,6 +488,7 @@ fn organization_summary(organization: &Value) -> Value {
             summary.insert(field.to_string(), value);
         }
     }
+    summary.insert("profile".to_string(), Value::String(profile.to_string()));
     Value::Object(summary)
 }
 
@@ -796,10 +804,11 @@ mod tests {
         let client = ApiClient::with_token(&base, "test-token".to_string(), 5)
             .with_org(Some("org_stale".to_string()));
 
-        let rows = membership_listing(&client, Some("org_a1")).await.unwrap();
+        let rows = membership_listing(&client, Some("org_a1"), "work").await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["current"], true);
         assert_eq!(rows[0]["joined"], "2026-01-02T03:04:05Z");
+        assert_eq!(rows[0]["profile"], "work");
         assert_eq!(request_line(&captured), "GET /users/memberships HTTP/1.1");
     }
 
@@ -826,9 +835,10 @@ mod tests {
 
         // The profile stores the slug, the payloads carry pids: the merged slug
         // is what marks the row.
-        let rows = membership_listing(&client, Some("acme")).await.unwrap();
+        let rows = membership_listing(&client, Some("acme"), "work").await.unwrap();
         assert_eq!(rows[0]["current"], true);
         assert_eq!(rows[1]["current"], false);
+        assert_eq!(rows[0]["profile"], "work");
 
         let requests: Vec<String> = captured
             .try_iter()
@@ -863,10 +873,12 @@ mod tests {
         .await;
         let client = ApiClient::with_token(&base, "test-token".to_string(), 5);
 
-        let rows = membership_listing(&client, None).await.unwrap();
+        let rows = membership_listing(&client, None, "work").await.unwrap();
         assert_eq!(rows[0]["slug"], "acme");
         assert_eq!(rows[1]["invited"], true);
         assert!(rows[1].get("slug").is_none(), "{:?}", rows[1]);
+        assert_eq!(rows[0]["profile"], "work");
+        assert_eq!(rows[1]["profile"], "work");
     }
 
     #[tokio::test]
@@ -883,9 +895,10 @@ mod tests {
         let client = ApiClient::with_token(&base, "test-token".to_string(), 5)
             .with_org(Some("org_a1".to_string()));
 
-        let summary = organization_show(&client, "org_a1").await.unwrap();
+        let summary = organization_show(&client, "org_a1", "work").await.unwrap();
         assert_eq!(summary["pid"], "org_a1");
         assert_eq!(summary["paying_customer"], false);
+        assert_eq!(summary["profile"], "work");
         assert!(summary.get("settings").is_none(), "{summary:?}");
         assert_eq!(
             request_line(&captured),
@@ -952,7 +965,7 @@ mod tests {
             },
         ]);
 
-        let rows = membership_rows(&memberships, Some("acme"));
+        let rows = membership_rows(&memberships, Some("acme"), "work");
         assert_eq!(rows.len(), 3);
 
         let acme = &rows[0];
@@ -960,6 +973,7 @@ mod tests {
         assert_eq!(acme["slug"], "acme");
         assert_eq!(acme["name"], "Acme");
         assert_eq!(acme["role"], "owner");
+        assert_eq!(acme["profile"], "work");
         assert!(acme.get("joined").is_some(), "{acme:?}");
 
         // Selected by pid, and not the selected one.
@@ -967,23 +981,55 @@ mod tests {
         assert_eq!(beta["current"], false);
         assert_eq!(beta["name"], "Beta");
         assert_eq!(beta["joined"], "2026-02-03T04:05:06Z");
+        assert_eq!(beta["profile"], "work");
         assert!(beta.get("invited").is_none(), "{beta:?}");
 
         let invited = &rows[2];
         assert_eq!(invited["current"], false);
         assert_eq!(invited["invited"], true);
+        assert_eq!(invited["profile"], "work");
         assert!(invited.get("joined").is_none(), "{invited:?}");
         // No slug in the payload, no null slug in the row.
         assert!(invited.get("slug").is_none(), "{invited:?}");
 
         // The profile may still hold a slug or a pid; a pid marks the row too.
-        let by_pid = membership_rows(&memberships, Some("org_b2"));
+        let by_pid = membership_rows(&memberships, Some("org_b2"), "work");
         assert_eq!(by_pid[1]["current"], true);
         assert_eq!(by_pid[0]["current"], false);
 
         // Nothing selected marks nothing.
-        let unselected = membership_rows(&memberships, None);
+        let unselected = membership_rows(&memberships, None, "work");
         assert!(unselected.iter().all(|row| row["current"] == false));
+    }
+
+    #[test]
+    fn a_row_without_optional_fields_still_names_the_profile_and_never_nulls() {
+        // A bare membership: no slug, no role, no timestamp, and the
+        // invitation's organization absent from the lookup.
+        let memberships = json!([
+            {"organization": {"id": "org_a1", "name": "Acme"}},
+            {
+                "organization": {"id": "org_c3", "name": "Gamma"},
+                "invitation": {"status": "pending", "invitation_id": "inv_1"},
+            },
+        ]);
+
+        let rows = membership_rows(&memberships, None, "personal");
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row["profile"], "personal");
+            // The value is always the resolved name, and nothing is ever null.
+            assert!(
+                row.as_object().is_some_and(|row| row.values().all(|value| !value.is_null())),
+                "null in {row:?}"
+            );
+            assert!(row.get("role").is_none(), "{row:?}");
+            assert!(row.get("joined").is_none(), "{row:?}");
+        }
+
+        // A profile name flows through unchanged, whatever it is.
+        let renamed = membership_rows(&memberships, None, "Team EU (prod)");
+        assert_eq!(renamed[0]["profile"], "Team EU (prod)");
     }
 
     #[test]
@@ -1003,7 +1049,7 @@ mod tests {
             "creator_id": "user_1",
         });
 
-        let summary = organization_summary(&organization);
+        let summary = organization_summary(&organization, "work");
         assert_eq!(
             summary,
             json!({
@@ -1014,6 +1060,7 @@ mod tests {
                 "paying_customer": true,
                 "created_at": "2025-12-01T00:00:00Z",
                 "max_members": 100,
+                "profile": "work",
             })
         );
         // Absent fields are absent, not null.

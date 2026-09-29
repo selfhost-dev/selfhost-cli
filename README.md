@@ -66,6 +66,8 @@ selfhost org activity list --page 2  # recent activity, newest first
 
 `org list` marks the organization other commands use by default and also shows invitations that are still waiting. `org show`, `org members list` and `org activity list` work on that same organization, or on the one you name.
 
+Every row of `org list` and the details `org show` prints also say which profile they came from, so a machine with several saved profiles is easy to tell apart.
+
 Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it is; anything else is looked up among the organizations you belong to, so a slug that does not resolve is a usage error. The organization you name on the command line wins over `--org` and `SELFHOSTDEV_ORG`, which in turn win over the organization saved in the profile; an empty value counts as unset. `org list` and `org use` ignore `--org` — the listing has to work even when the saved organization is gone, and `org use` is how you replace it.
 
 ## Commands
