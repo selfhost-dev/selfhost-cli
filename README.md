@@ -84,8 +84,6 @@ Invitations arrive by email. There is no separate add-member call: `org members 
 
 Deleting an organization, removing a member and cancelling an invitation are destructive, so they ask first: `org delete` wants the organization's name typed back, and the other two want a yes. `--yes` answers the prompt for scripts; without it, a run with no terminal stops and tells you to pass `--yes`, rather than waiting on a prompt that can never arrive.
 
-An organization change and `--dry-run` do not mix yet: the command refuses to run and says nothing was sent, so the flag can never be mistaken for a safety net.
-
 Every row of `org list` and the details `org show` prints also say which profile they came from, so a machine with several saved profiles is easy to tell apart.
 
 Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it is; anything else is looked up among the organizations you belong to, so a slug that does not resolve is a usage error. The organization you name on the command line wins over `--org` and `SELFHOSTDEV_ORG`, which in turn win over the organization saved in the profile; an empty value counts as unset. `org list` and `org use` ignore `--org` — the listing has to work even when the saved organization is gone, and `org use` is how you replace it.
@@ -117,6 +115,8 @@ Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it
 | completion | Shell completions for bash, zsh, fish |
 
 Every command takes the same global flags: `--profile`, `--base-url`, `--org`, `-o/--format`, `--json`, `--no-color`, `--timeout`, `--poll-interval`, `-y/--yes`, `--dry-run`, `-q/--quiet`, `-v/--verbose`, `--debug`.
+
+No command previews a request yet: any command run with `--dry-run` stops before it does anything and says nothing was sent, so the flag can never be mistaken for a safety net.
 
 ## Raw API access
 

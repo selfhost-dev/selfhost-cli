@@ -190,7 +190,7 @@ pub struct GlobalArgs {
     #[arg(short = 'y', long, global = true, help_heading = "Global options")]
     pub yes: bool,
 
-    /// Show the API request instead of sending it
+    /// Stop before doing anything: nothing is previewed or sent yet
     #[arg(long = "dry-run", global = true, help_heading = "Global options")]
     pub dry_run: bool,
 
@@ -414,25 +414,36 @@ pub fn should_confirm(global: &GlobalArgs, command: &str) -> Result<bool> {
     )))
 }
 
-/// Refuse `--dry-run` on a mutating `org` verb. The global flag exists, but no
-/// organization change simulates its request yet, and a run that quietly sent
-/// the request anyway would be a false safety net. This fails closed instead,
-/// before the confirmation gate, before a credential is read and before any
-/// request is sent, so the flag can never delete something by accident.
-pub fn reject_dry_run(global: &GlobalArgs) -> Result<()> {
-    reject_dry_run_for(global, "organization changes")
+/// The refusal `--dry-run` carries: the flag exists, but nothing simulates a
+/// request yet, and a run that quietly sent the request anyway would be a false
+/// safety net. The shared gate in [`Cli::run`] raises it for every command
+/// before its handler runs — a handler must never send, write or read state for
+/// a change while the flag is set — and the bare invocation in `main` raises it
+/// for a run that never reached that gate.
+pub fn dry_run_refused(subject: &str) -> Error {
+    Error::Usage(format!(
+        "dry runs are not supported for {subject} yet; nothing was sent"
+    ))
 }
 
-/// [`reject_dry_run`] with the thing the flag is refused for named for the
-/// reader: the raw `api` command reaches far more than organizations, so it
-/// says so instead of blaming a change it is not making.
+/// [`dry_run_refused`] as a gate: nothing happens when the flag is unset.
 pub fn reject_dry_run_for(global: &GlobalArgs, subject: &str) -> Result<()> {
     if global.dry_run {
-        return Err(Error::Usage(format!(
-            "dry runs are not supported for {subject} yet; nothing was sent"
-        )));
+        return Err(dry_run_refused(subject));
     }
     Ok(())
+}
+
+/// What `--dry-run` names when it refuses: nothing simulates a request yet, so
+/// the refusal points at the closest thing to what the command would have
+/// changed. Every command gets a subject, so the message can never claim a
+/// subject the command does not have.
+pub fn dry_run_subject_of_group(group: Option<&str>) -> &'static str {
+    match group {
+        Some("org") => "organization changes",
+        Some("api") => "api calls",
+        _ => "this command",
+    }
 }
 
 /// Ask the user to type `expected` back. `prompt` is printed verbatim, so the
@@ -1122,6 +1133,17 @@ pub enum Command {
     Completion(completion::CompletionArgs),
 }
 
+/// The subject the gate refuses `--dry-run` with, derived from the command it
+/// was handed. A run that never reaches the gate — the bare invocation — reads
+/// the same vocabulary from [`dry_run_subject_of_group`].
+fn dry_run_subject(command: &Command) -> &'static str {
+    match command {
+        Command::Api(_) => dry_run_subject_of_group(Some("api")),
+        Command::Org(_) => dry_run_subject_of_group(Some("org")),
+        _ => dry_run_subject_of_group(None),
+    }
+}
+
 // Root parser: global options plus the command family (design §3).
 //
 // The help trailer is not an attribute: `after_help` is generated from the
@@ -1237,6 +1259,16 @@ impl Cli {
     /// their slice implements them.
     pub fn run(self) -> crate::error::Result<()> {
         let Cli { global, command } = self;
+
+        // The dry-run gate owns every refusal: no command simulates its
+        // request yet, so with the flag set nothing may be sent, written, or
+        // read in order to change something. It runs here, in the shared
+        // dispatch, before any handler — a handler must never send under the
+        // flag, and a command that really previews its request later has to be
+        // exempted here on purpose, never by dropping a check of its own.
+        if global.dry_run {
+            return reject_dry_run_for(&global, dry_run_subject(&command));
+        }
 
         match command {
             Command::Api(args) => block_on(api::run(&global, args)),

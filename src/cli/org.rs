@@ -30,7 +30,7 @@ use crate::output::strip_control_characters;
 
 use super::{
     GlobalArgs, NoArgs, block_on, confirm_typed, confirm_yes_no, find_organization, human_output,
-    org_client, organization_matches, organization_pid, print, reject_dry_run, should_confirm,
+    org_client, organization_matches, organization_pid, print, should_confirm,
     unknown_organization, unscoped_client,
 };
 
@@ -491,7 +491,6 @@ async fn activity(global: &GlobalArgs, args: &OrgActivityArgs) -> Result<()> {
 /// platform derives the slug from the name, so the response is the only place
 /// the slug the organization got appears.
 async fn create(global: &GlobalArgs, args: &OrgCreateArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let mut store = ProfileStore::load()?;
     let name = store.resolved_name(global.profile.as_deref())?;
     let client = unscoped_client(&mut store, &name, global).await?;
@@ -515,7 +514,6 @@ async fn create(global: &GlobalArgs, args: &OrgCreateArgs) -> Result<()> {
 /// record of the result. The update response carries no data, so the summary is
 /// a fresh read rather than what we sent.
 async fn update(global: &GlobalArgs, args: &OrgUpdateArgs) -> Result<()> {
-    reject_dry_run(global)?;
     if args.name.is_none() && args.description.is_none() {
         return Err(Error::Usage(
             "nothing to update: pass --name or --description".to_string(),
@@ -552,7 +550,6 @@ async fn update(global: &GlobalArgs, args: &OrgUpdateArgs) -> Result<()> {
 /// it. `--yes` answers the prompt, and the non-interactive gate has already
 /// stopped the command when there is neither a terminal nor `--yes`.
 async fn delete(global: &GlobalArgs, args: &OrgDeleteArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let ask = should_confirm(global, "org delete")?;
 
     let mut store = ProfileStore::load()?;
@@ -630,7 +627,6 @@ fn deleted_summary(organization: &Value, pid: &str) -> Value {
 /// The API has no add-member call, so the person is invited and the membership
 /// appears when they accept.
 async fn invite(global: &GlobalArgs, args: &InviteArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let mut store = ProfileStore::load()?;
     let name = store.resolved_name(global.profile.as_deref())?;
     let (client, pid, reference) = org_client(&mut store, &name, global, None).await?;
@@ -658,7 +654,6 @@ async fn invite(global: &GlobalArgs, args: &InviteArgs) -> Result<()> {
 /// `org members remove <email>`: resolve the email to a user pid, confirm, then
 /// remove. Membership is soft-deleted, so a later invitation works.
 async fn remove_member(global: &GlobalArgs, args: &MemberTargetArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let ask = should_confirm(global, "org members remove")?;
 
     let mut store = ProfileStore::load()?;
@@ -701,7 +696,6 @@ async fn remove_member(global: &GlobalArgs, args: &MemberTargetArgs) -> Result<(
 /// `org members update-role <email> --role ROLE`: resolve the email to a user
 /// pid, then hand the platform the new role's pid.
 async fn update_member_role(global: &GlobalArgs, args: &UpdateRoleArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let mut store = ProfileStore::load()?;
     let name = store.resolved_name(global.profile.as_deref())?;
     let (client, pid, reference) = org_client(&mut store, &name, global, None).await?;
@@ -737,7 +731,6 @@ async fn update_member_role(global: &GlobalArgs, args: &UpdateRoleArgs) -> Resul
 /// `org invites revoke <email>`: only a pending invitation can be cancelled, so
 /// the email is matched among the pending ones, confirmed, then deleted.
 async fn revoke_invitation(global: &GlobalArgs, args: &MemberTargetArgs) -> Result<()> {
-    reject_dry_run(global)?;
     let ask = should_confirm(global, "org invites revoke")?;
 
     let mut store = ProfileStore::load()?;

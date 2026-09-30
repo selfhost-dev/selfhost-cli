@@ -39,11 +39,34 @@ fn main() -> ExitCode {
 /// design §3/§7); every other parse error — including `--help`/`--version`,
 /// which stay errors of their own kind — keeps clap's normal output and exit.
 fn handle_parse_error(err: clap::Error) -> ExitCode {
-    if is_missing_subcommand(err.kind()) && tui_enabled() {
-        // Same code path as `selfhost tui`: the welcome-screen scaffold today.
-        return report(cli::tui::run(cli::tui::TuiArgs::default()));
+    if is_missing_subcommand(err.kind()) {
+        if let Some(refusal) = dry_run_refusal() {
+            return report(Err(refusal));
+        }
+        if tui_enabled() {
+            // Same code path as `selfhost tui`: the welcome-screen scaffold today.
+            return report(cli::tui::run(cli::tui::TuiArgs::default()));
+        }
     }
     err.exit()
+}
+
+/// The refusal for a bare invocation with `--dry-run`, if the flag is set.
+///
+/// A missing subcommand never reaches [`cli::Cli::run`], where the dry-run gate
+/// lives, so the flag is read from a tolerant parse: clap fills in the global
+/// options it saw before the subcommand went missing. `None` means the flag was
+/// absent and the caller keeps its ordinary path — the terminal UI on a
+/// terminal, clap's own usage error everywhere else.
+fn dry_run_refusal() -> Option<error::Error> {
+    let matches = cli::command().ignore_errors(true).get_matches();
+    let global = cli::GlobalArgs::from_arg_matches(&matches).ok()?;
+    if !global.dry_run {
+        return None;
+    }
+    Some(cli::dry_run_refused(cli::dry_run_subject_of_group(
+        matches.subcommand_name(),
+    )))
 }
 
 /// Whether a parse error means "no subcommand was given".
