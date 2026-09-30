@@ -158,8 +158,10 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Only the CloudFront service principal serving this distribution
-          # may read, and only through the OAC above.
+          # Only a CloudFront distribution in this account may read, and only
+          # through the OAC above. The distribution itself is created by the
+          # edge stack, so its exact ARN cannot be resolved here; scoping to
+          # the account's distributions is the tightest form available.
           - Sid: AllowCloudFrontOACRead
             Effect: Allow
             Principal:
@@ -167,10 +169,8 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub "${DistributionBucket.Arn}/*"
             Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub
-                  - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
-                  - DistId: ${EdgeDistribution}
+              StringLike:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/*"
           # The uploader role may write.
           - Sid: AllowUploaderPut
             Effect: Allow
@@ -187,15 +187,18 @@ Resources:
               - !GetAtt DistributionBucket.Arn
               - !Sub "${DistributionBucket.Arn}/*"
             Condition:
-              StringNotEquals:
+              # Both keys are tested with NOT-LIKE, so a request that matches
+              # either the principal list or the CloudFront source pattern
+              # escapes the deny. A missing key counts as a match, which is
+              # what keeps anonymous callers denied.
+              StringNotLike:
                 aws:PrincipalArn:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/selfhost-cli-distribution-uploader"
                   # Break-glass: the account admin can always manage the bucket,
                   # so a bad policy can never lock everyone out again.
                   - !Sub "arn:aws:iam::${AWS::AccountId}:user/aziz"
-                  - !Sub
-                    - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
-                    - DistId: ${EdgeDistribution}
+                  - !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/*"
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/*"
 
   # -----------------------------------------------------------------------
   # Stack: distribution-edge (us-east-1)
