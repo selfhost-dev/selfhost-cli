@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 # Least privilege by default. Only the `release` job widens this to
 # `contents: write`; validation and build stay read-only.
@@ -658,3 +659,31 @@ jobs:
             --cache-control "max-age=300, must-revalidate"
           echo "distribution published for v${VERSION}"
 
+
+  # Temporary: proves the upload path end to end before the next tagged
+  # release depends on it. Assumes the same role as the upload job and
+  # writes one scratch object. Removed once it has run.
+  verify-distribution-write:
+    name: Verify the upload path
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - *require-release-admins
+      - name: Assume the AWS uploader role via OIDC
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          role-to-assume: ${{ vars.DISTRIBUTION_ROLE_ARN }}
+          aws-region: ap-south-1
+      - name: Write a scratch object
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity
+          echo probe > probe.txt
+          aws s3 cp probe.txt s3://selfhost-cli-distribution-prod/pipeline-write-probe.txt
+          echo "write path works"
