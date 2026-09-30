@@ -189,6 +189,9 @@ Resources:
               StringNotEquals:
                 aws:PrincipalArn:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/selfhost-cli-distribution-uploader"
+                  # Break-glass: the account admin can always manage the bucket,
+                  # so a bad policy can never lock everyone out again.
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:user/aziz"
                   - !Sub
                     - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
                     - DistId: ${EdgeDistribution}

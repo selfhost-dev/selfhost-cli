@@ -6,6 +6,9 @@ on:
   push:
     tags:
       - "v*"
+  # One-time trigger for the recover-bucket-policy job below. It is removed
+  # after its single use; tag pushes are unaffected.
+  workflow_dispatch:
 
 # Least privilege by default. Only the `release` job widens this to
 # `contents: write`; validation and build stay read-only.
@@ -31,7 +34,7 @@ jobs:
     name: Validate tag against Cargo.toml
     # The repository guard is repeated on every job, publish-capable or not, so a
     # fork's `v*` tag push stops here instead of anywhere near a release.
-    if: github.repository == 'selfhost-dev/selfhost-cli'
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -86,7 +89,7 @@ jobs:
   build:
     name: Build ${{ matrix.name }}
     needs: validate-release-source
-    if: github.repository == 'selfhost-dev/selfhost-cli'
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
     strategy:
@@ -540,7 +543,7 @@ jobs:
       - name: Assume the AWS uploader role via OIDC
         uses: aws-actions/configure-aws-credentials@61815dcd50bd04116d70fd4a7139cb82a7e42f35 # v5
         with:
-          role-to-assume: arn:aws:iam::123456789012:role/selfhost-cli-distribution-uploader
+          role-to-assume: ${{ vars.DISTRIBUTION_ROLE_ARN }}
           aws-region: ap-south-1
 
       - name: Upload versioned binaries and checksums
@@ -657,3 +660,31 @@ jobs:
             --content-type "text/plain; charset=utf-8" \
             --cache-control "max-age=300, must-revalidate"
           echo "distribution published for v${VERSION}"
+
+  # One-time recovery for the bucket policy that locked out every principal
+  # except the uploader role (base stack stuck in UPDATE_ROLLBACK_FAILED).
+  # Run once by hand from main, then removed: it assumes the uploader role
+  # through OIDC and deletes the locking policy so the corrected template
+  # (with the admin break-glass exception) can be deployed.
+  recover-bucket-policy:
+    name: Delete the bucket-locking policy
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - *require-release-admins
+      - name: Assume the AWS uploader role via OIDC
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd04116d70fd4a7139cb82a7e42f35 # v5
+        with:
+          role-to-assume: ${{ vars.DISTRIBUTION_ROLE_ARN }}
+          aws-region: ap-south-1
+      - name: Delete the locking bucket policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3api delete-bucket-policy --bucket selfhost-cli-distribution-prod
+          echo "locking policy deleted; bucket is admin-manageable again"
