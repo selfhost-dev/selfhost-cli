@@ -49,6 +49,11 @@ does the rest.
   ID and this repository is public. The role trusts only tag pushes in this
   repository, and it may only put objects in the bucket (plus invalidate the
   four mutable pointers).
+- Which bucket and distribution it talks to comes from the repository
+  **variables** `DISTRIBUTION_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` and
+  `AWS_REGION` — deployment facts rather than code, so pointing the pipeline at
+  other infrastructure is a settings change and never a commit. A fork gets
+  none of them.
 - It uploads the binaries under `v<version>/` only after proving the path does
   not exist, so a write-once path is never overwritten.
 - It regenerates `latest.json` from the artifacts it just uploaded, so the

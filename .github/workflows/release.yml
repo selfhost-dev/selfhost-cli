@@ -519,6 +519,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # The bucket and the distribution belong to the deployment, not to the
+    # code, so they are repository variables: changing infrastructure then
+    # needs no file change, and a fork inherits nothing. Neither value is a
+    # secret -- the role ARN is the only secret, because it carries the AWS
+    # account ID. They reach the scripts through `env` rather than being
+    # spliced into a `run:` body, the same way matrix values do below.
+    env:
+      DISTRIBUTION_BUCKET: ${{ vars.DISTRIBUTION_BUCKET }}
+      CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
 
     steps:
       - *require-release-admins
@@ -539,7 +548,7 @@ jobs:
           # trust policy on the role accepts only tag pushes in this
           # repository, and the credentials are short-lived.
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ap-south-1
+          aws-region: ${{ vars.AWS_REGION }}
           # Belt and braces: the action masks the account ID in its own logs.
           mask-aws-account-id: true
 
@@ -560,7 +569,7 @@ jobs:
             selfhost-windows-aarch64.zip
           do
             if aws s3api head-object \
-                 --bucket selfhost-cli-distribution-prod \
+                 --bucket "$DISTRIBUTION_BUCKET" \
                  --key "v${VERSION}/${name}" >/dev/null 2>&1; then
               echo "::error::v${VERSION}/${name} already exists in the distribution bucket -- refusing to overwrite an immutable path"
               exit 1
@@ -573,7 +582,7 @@ jobs:
             selfhost-macos-aarch64
           do
             aws s3 cp "dist/${name}/${name}" \
-              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}" \
+              "s3://${DISTRIBUTION_BUCKET}/v${VERSION}/${name}" \
               --content-type "application/octet-stream" \
               --cache-control "public, max-age=31536000, immutable"
           done
@@ -582,7 +591,7 @@ jobs:
             selfhost-windows-aarch64.zip
           do
             aws s3 cp "dist/${name}/${name}" \
-              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}" \
+              "s3://${DISTRIBUTION_BUCKET}/v${VERSION}/${name}" \
               --content-type "application/zip" \
               --cache-control "public, max-age=31536000, immutable"
           done
@@ -595,7 +604,7 @@ jobs:
             selfhost-windows-aarch64.zip
           do
             aws s3 cp "dist/${name}/${name}.sha256" \
-              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}.sha256" \
+              "s3://${DISTRIBUTION_BUCKET}/v${VERSION}/${name}.sha256" \
               --content-type "text/plain; charset=utf-8" \
               --cache-control "public, max-age=31536000, immutable"
           done
@@ -655,16 +664,16 @@ jobs:
               indent=2,
           ))
           PY
-          aws s3 cp latest.json s3://selfhost-cli-distribution-prod/latest.json \
+          aws s3 cp latest.json "s3://${DISTRIBUTION_BUCKET}/latest.json" \
             --content-type "application/json" \
             --cache-control "public, max-age=300"
-          aws s3 cp distribution/install.sh s3://selfhost-cli-distribution-prod/install.sh \
+          aws s3 cp distribution/install.sh "s3://${DISTRIBUTION_BUCKET}/install.sh" \
             --content-type "text/x-shellscript" \
             --cache-control "public, max-age=300"
-          aws s3 cp distribution/install.ps1 s3://selfhost-cli-distribution-prod/install.ps1 \
+          aws s3 cp distribution/install.ps1 "s3://${DISTRIBUTION_BUCKET}/install.ps1" \
             --content-type "text/plain" \
             --cache-control "public, max-age=300"
-          aws s3 cp distribution/install.cmd s3://selfhost-cli-distribution-prod/install.cmd \
+          aws s3 cp distribution/install.cmd "s3://${DISTRIBUTION_BUCKET}/install.cmd" \
             --content-type "text/plain" \
             --cache-control "public, max-age=300"
           echo "distribution published for v${VERSION}"
@@ -707,6 +716,6 @@ jobs:
           # release reach users now instead of within five minutes. Versioned
           # paths are write-once and are never invalidated.
           aws cloudfront create-invalidation \
-            --distribution-id E37YM4KZPXQ3TV \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
             --paths /latest.json /install.sh /install.ps1 /install.cmd \
             --query 'Invalidation.Status' --output text
