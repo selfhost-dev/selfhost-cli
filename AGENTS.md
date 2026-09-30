@@ -11,6 +11,12 @@ Working rules for coding agents in this repo. Humans may override any rule with 
 - One logical change per commit. Do not force-push or rewrite commits that are not yours.
 - Banned in commit messages: the word `verbatim`, and process/internal labels (`round 1`, `verifier round`, `slice N`, `WIP`). Describe the change, not the workflow that produced it.
 
+## Public surfaces and identifiers
+
+- This repository is public. Never write an AWS account ID, a role ARN, a credential, or a token into a file, a commit message, a pull request, a workflow run log, or a release note.
+- Never put an AWS organization ID, an AWS account ID, or any other organization identifier into a pull request naked — not in the title, the body, a comment, a pasted log, a diff, or a screenshot. Show it masked (`****1234`) or name the organization instead. Issues, discussions, and release notes are the same public surface.
+- A history rewrite does not take an identifier off GitHub. Pull request diffs, their `refs/pull/<n>/head` refs, workflow run logs, and release pages keep serving it after the branch is clean. Treat everything pushed as permanent.
+
 ## Test cases
 
 - Test names describe the **behavior under test**, e.g. `pool_commands_match_platform_capabilities`, `bare_invocation_opens_tui_on_a_tty`.
