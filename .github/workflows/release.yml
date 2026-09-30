@@ -1,0 +1,496 @@
+name: Release
+
+# A `v*` tag is the only thing that produces a release. Everything below is
+# written so that pushing a tag to a fork can never reach the publishing step.
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least privilege by default. Only the `release` job widens this to
+# `contents: write`; validation and build stay read-only.
+permissions:
+  contents: read
+
+# Two tag pushes must never race for the same release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned explicitly instead of `stable` so a tag built months from now uses the
+  # same compiler that was tested. 1.98.1 is current stable (it is also the Rust
+  # that ships on GitHub's runner images) and sits well above the
+  # `rust-version = "1.88"` MSRV floor declared in Cargo.toml. Quoted so YAML
+  # cannot read it as a number.
+  RUST_TOOLCHAIN_VERSION: "1.98.1"
+
+jobs:
+  validate-release-source:
+    name: Validate tag against Cargo.toml
+    # The repository guard is repeated on every job, publish-capable or not, so a
+    # fork's `v*` tag push stops here instead of anywhere near a release.
+    if: github.repository == 'selfhost-dev/selfhost-cli'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      # Only repository admins may publish or re-run a release. Both the actor
+      # and the actor who triggered the run are checked, so neither can quietly
+      # publish. This is defense in depth, not the real control: the stronger
+      # one is a repository ruleset restricting who may create `v*` tags, and
+      # that has to be configured on the repository itself -- today
+      # `gh api repos/selfhost-dev/selfhost-cli/rulesets` returns `[]`.
+      - &require-release-admins
+        name: Require repository admins for publishing and reruns
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for actor in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
+            permission="$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$actor/permission" --jq .permission)"
+            if [ "$permission" != "admin" ]; then
+              echo "error: $actor must have repository admin permission to publish" >&2
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify the pushed tag matches the Cargo.toml version
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `[package] version`, not `rust-version`; the anchor keeps it to the
+          # first `version = "..."` line in the file.
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ -z "$cargo_version" ]; then
+            echo "::error::could not read the [package] version out of Cargo.toml"
+            exit 1
+          fi
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$cargo_version" != "$tag_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version -- tag v$cargo_version, or bump Cargo.toml first"
+            exit 1
+          fi
+          echo "Releasing $cargo_version as $GITHUB_REF_NAME"
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: validate-release-source
+    if: github.repository == 'selfhost-dev/selfhost-cli'
+    permissions:
+      contents: read
+    strategy:
+      # One broken target should not hide the state of the other five.
+      fail-fast: false
+      matrix:
+        include:
+          # Linux. `aws-lc-sys` (via aws-lc-rs <- rustls <- reqwest) compiles C
+          # with cmake, so both targets need a musl toolchain as well as cmake.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: selfhost-linux-x86_64
+            # Static musl binary on an x86_64 runner: it runs here.
+            native: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: selfhost-linux-aarch64
+            # Cross-compiled. There is no QEMU user-mode runner on the hosted
+            # images, and standing one up to execute a musl binary would add
+            # flake to a release for a check the x86_64 Linux leg already
+            # covers. The tag/Cargo.toml validation above is what protects this
+            # target from being mislabeled.
+            native: false
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: selfhost-macos-x86_64
+            # macos-latest is Apple silicon; the step below guarantees this
+            # x86_64 binary can be executed for its version check.
+            native: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: selfhost-macos-aarch64
+            native: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: selfhost-windows-x86_64.zip
+            native: true
+          # Windows ARM64 runs on a native ARM64 runner rather than crossing from
+          # x64 with cargo-xwin. cargo-xwin was the earlier preference only
+          # because `windows-11-arm` was a preview image needing approval; that
+          # stopped being true on 2026-08-19, when Windows 11 Arm64 with Visual
+          # Studio went GA for all customers, and on 2026-09-30 the
+          # `windows-11-arm` label finished migrating to the Visual Studio
+          # image. The tradeoffs we accept: the label must be enabled for the
+          # repository (free on public repos such as this one), and it carries
+          # the Visual Studio image forward over time. In exchange
+          # `aarch64-pc-windows-msvc` builds with its own MSVC and Windows SDK,
+          # so there is no downloaded CRT, no generated cmake toolchain file,
+          # and no cross linker to get wrong -- and the result can be executed
+          # here for the same identity check every other native target gets.
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+            name: selfhost-windows-aarch64.zip
+            native: true
+    runs-on: ${{ matrix.os }}
+    # Generous, because six full release builds of a crate that compiles
+    # aws-lc-sys from source legitimately run long. The point is that a hung
+    # build gives up the runner instead of sitting on it for six hours.
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN_VERSION }}
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Prefer the canonical Ubuntu mirrors over Azure
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+            echo "Using apt mirrors:"
+            cat /etc/apt/apt-mirrors.txt
+          fi
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # musl-tools provides the musl-gcc driver. cmake and ninja-build build
+          # aws-lc-sys, which is the only C dependency in the tree.
+          # gcc-aarch64-linux-gnu is the aarch64 cross compiler and linker.
+          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
+
+      - name: Install NASM for the x86_64 Windows target
+        if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
+        run: choco install nasm --version=3.2.0 --require-checksums --no-progress -y
+        # aws-lc-sys ships pre-generated NASM sources for win-x86_64 only, and
+        # its build script fails outright when nasm is missing rather than
+        # falling back to the checked-in objects. (win-aarch64 uses .S sources
+        # assembled by clang, so the ARM64 leg needs nothing here.)
+        # nasm assembles this binary's cryptography and the `--version` identity
+        # check cannot detect a tampered assembler, so both the version and the
+        # package checksum are pinned. 3.2.0 is the current version in the
+        # Chocolatey community feed, which is what `choco install` resolves
+        # from, and it is the same line aws-lc-rs exercises in its own CI via
+        # ilammy/setup-nasm. Bump deliberately, and expect a rebuild.
+
+      - name: Prefer the Ninja cmake generator
+        if: runner.os != 'Windows'
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        # Ninja is markedly faster than the default Unix Makefiles generator for
+        # aws-lc-sys on both Linux and macOS. Windows is left on cmake's default
+        # Visual Studio generator on purpose: that is the generator aws-lc-sys's
+        # own Windows build script is written around.
+
+      - name: Set the musl C toolchain and the aarch64 linker
+        if: runner.os == 'Linux'
+        run: |
+          {
+            # aws-lc-sys compiles C through the `cc` crate, which derives the
+            # compiler from the target triple. For aarch64-unknown-linux-musl it
+            # would look for `aarch64-linux-musl-gcc`, which no distro ships, so
+            # name the real cross compiler. The objects it produces are plain
+            # aarch64 ELF; rustc links them into its self-contained static musl
+            # binary and resolves libc from there.
+            echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc"
+            # musl-tools ships only musl-gcc, which the `cc` crate would find on
+            # its own; naming it keeps both musl legs spelled the same way.
+            echo "CC_x86_64_unknown_linux_musl=musl-gcc"
+            # The aarch64 leg also needs a linker: rustc cannot
+            # self-contained-link a target the host gcc has no driver for.
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore the Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        continue-on-error: true
+        with:
+          key: release-${{ matrix.target }}
+        # Caching is an optimisation, never a release gate.
+
+      - name: Ensure x86_64 binaries can execute on this runner
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          # Probe the capability rather than trusting the installer's exit code.
+          # macos-latest already has Rosetta baked in at image build time, and
+          # `softwareupdate --install-rosetta` fails intermittently with
+          # "Rosetta 2 update is not available" on images where it has already
+          # succeeded. The installer's status is swallowed on purpose: the
+          # default `bash -e` shell aborts a step on a failing command inside an
+          # `if` body, which would replace the capability diagnostic below with
+          # the installer's raw status code.
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license || true
+          fi
+          # Still a hard gate: without this the identity check below could not
+          # run, and macOS would ship its x86_64 artifact unverified.
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::error::this arm64 runner cannot execute x86_64 binaries"
+            exit 1
+          fi
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+        # --locked keeps the release reproducible from the committed Cargo.lock.
+        # Matrix values reach every script below through a step-level `env:`
+        # rather than being spliced into the body with `${{ }}`. A git refname
+        # may legally contain `;`, `$(` and `"`, so a `run:` body is the one
+        # place a crafted value could become code.
+
+      - name: Package
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          # Ship the bare binary under the release name, with a fixed mode so the
+          # asset is executable for everyone who downloads it. Installers rename
+          # it to `selfhost` on the way in; the release name is the key the
+          # checksum file and any later manifest use.
+          install -m 0755 "target/$TARGET/release/selfhost" "$ASSET"
+
+      - name: Package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP "selfhost-package"
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target\$env:TARGET\release\selfhost.exe" (Join-Path $stage "selfhost.exe")
+          # A bare .exe is not a usable release download on Windows, and the zip
+          # must hold selfhost.exe at its root -- that is where a PowerShell
+          # installer looks after Expand-Archive, with no wrapping directory.
+          Compress-Archive -Path (Join-Path $stage "selfhost.exe") -DestinationPath $env:ASSET -Force
+
+      - name: Verify the packaged binary reports the expected version
+        if: matrix.native && runner.os != 'Windows'
+        shell: bash
+        env:
+          ASSET: ${{ matrix.name }}
+          WANTED: ${{ needs.validate-release-source.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The validation job already proved this equals Cargo.toml's version.
+          # `WANTED`, not `EXPECTED`: shellcheck reads a case-only near-match
+          # against the local `expected` below as a typo.
+          expected="selfhost $WANTED"
+          actual="$("./$ASSET" --version)"
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::$ASSET reports '$actual', expected '$expected'"
+            exit 1
+          fi
+
+      - name: Verify the packaged binary reports the expected version
+        if: matrix.native && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ASSET: ${{ matrix.name }}
+          WANTED: ${{ needs.validate-release-source.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = "selfhost $env:WANTED"
+          $stage = Join-Path $env:RUNNER_TEMP "selfhost-verify"
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          # Run the binary out of the archive, so the check covers the packaging
+          # too and not just the build output.
+          Expand-Archive -LiteralPath $env:ASSET -DestinationPath $stage
+          $actual = (& (Join-Path $stage "selfhost.exe") --version | Out-String).Trim()
+          echo "expected: $expected"
+          echo "actual:   $actual"
+          if ($actual -ne $expected) {
+            throw "$env:ASSET reports '$actual', expected '$expected'"
+          }
+
+      - name: Checksum
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          ASSET: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          # `<sha256>  <file>` is the `sha256sum` format so a user can verify a
+          # download with `sha256sum -c` or `shasum -a 256 -c` unchanged, and a
+          # later manifest phase can parse it. It is a transfer-integrity aid,
+          # not a provenance guarantee: the release account and this pipeline
+          # share one trust anchor, so these digests cannot attest that a build
+          # came from a reviewed commit. What they do buy is closed here -- the
+          # release job re-runs every one of them against the artifact it
+          # actually downloaded.
+          if [ "$(uname -s)" = "Darwin" ]; then
+            shasum -a 256 "$ASSET" > "$ASSET.sha256"
+          else
+            sha256sum "$ASSET" > "$ASSET.sha256"
+          fi
+          cat "$ASSET.sha256"
+
+      - name: Checksum
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ASSET: ${{ matrix.name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $file = $env:ASSET
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+          # Write the bytes directly with an explicit "\n". Out-File would end
+          # the line with CRLF, and while GNU sha256sum -c tolerates the
+          # trailing \r on the recorded filename, BSD shasum -a 256 -c on macOS
+          # rejects it -- so this keeps all three platforms byte-identical and
+          # verifiable with either tool, including by the release job.
+          [System.IO.File]::WriteAllText("$file.sha256", "$hash  $file`n")
+          Get-Content "$file.sha256"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}
+            ${{ matrix.name }}.sha256
+          if-no-files-found: error
+          # Short retention, so a second and unverified copy of these binaries
+          # does not sit in the artifact store for the 90-day default. The
+          # release is the durable copy, and anything still needed after a
+          # re-run is rebuilt from the tag.
+          retention-days: 7
+
+  release:
+    name: Publish the GitHub release
+    needs: [build, validate-release-source]
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - *require-release-admins
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download every build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+
+      - name: Check that every asset is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -type f -print | sort
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64 \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            test -f "dist/$name/$name" || { echo "::error::missing dist/$name/$name"; exit 1; }
+            test -f "dist/$name/$name.sha256" || { echo "::error::missing dist/$name/$name.sha256"; exit 1; }
+          done
+          test -f LICENSE || { echo "::error::missing LICENSE"; exit 1; }
+          echo "All 6 binaries, 6 checksum files and the LICENSE are present."
+
+      - name: Verify every checksum against the downloaded binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Closes the gap the presence check leaves: that one only proves the
+          # files exist. This proves the bytes about to be published are the
+          # bytes the build job measured. `sha256sum -c` reads the
+          # `<sha256>  <file>` format all three platform legs emit, and the
+          # recorded filename is bare, so run it from the artifact's directory.
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64 \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            (cd "dist/$name" && sha256sum -c "$name.sha256") \
+              || { echo "::error::checksum verification failed for $name"; exit 1; }
+          done
+          echo "All 6 checksums verify against the downloaded artifacts."
+
+      # action-gh-release rather than `gh release create`: it resolves the
+      # release from the triggering ref and uploads the whole file list in one
+      # call, and `fail_on_unmatched_files` has no `gh` equivalent -- with the
+      # CLI you would need a second upload step and would lose that guard.
+      # AHEAD OF HERDR: herdr pins v3.0.0, which predates "upload small checksum
+      # assets reliably" (#815). That is our exact payload -- six ~90-byte
+      # .sha256 files -- so hold the current v3 and move this pin on releases.
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: selfhost ${{ needs.validate-release-source.outputs.version }}
+          # A curated body, deliberately not `generate_release_notes`. That
+          # setting renders merged-PR titles and commit messages verbatim onto
+          # the page that will carry our install instructions, so a hostile PR
+          # title could impersonate install steps and an @mention could ping
+          # arbitrary accounts -- neither of which needs write access. A static
+          # string is the honest version of what this repo has today: there is
+          # no changelog tooling here yet, so there is no curated per-release
+          # summary to render. The tag's commit history and the README are the
+          # real record; a `body_path` changelog is a later phase.
+          body: |
+            selfhost ${{ needs.validate-release-source.outputs.version }}
+
+            Installable binaries for every supported platform are attached, each
+            with a `.sha256` sidecar you can check yourself after downloading:
+
+            ```
+            sha256sum -c selfhost-linux-x86_64.sha256
+            ```
+
+            See the README in this tag for usage, and the repository for source.
+          # A typo in one of the paths below must fail the release, not quietly
+          # publish a partial set of downloads.
+          fail_on_unmatched_files: true
+          files: |
+            dist/selfhost-linux-x86_64/selfhost-linux-x86_64
+            dist/selfhost-linux-x86_64/selfhost-linux-x86_64.sha256
+            dist/selfhost-linux-aarch64/selfhost-linux-aarch64
+            dist/selfhost-linux-aarch64/selfhost-linux-aarch64.sha256
+            dist/selfhost-macos-x86_64/selfhost-macos-x86_64
+            dist/selfhost-macos-x86_64/selfhost-macos-x86_64.sha256
+            dist/selfhost-macos-aarch64/selfhost-macos-aarch64
+            dist/selfhost-macos-aarch64/selfhost-macos-aarch64.sha256
+            dist/selfhost-windows-x86_64.zip/selfhost-windows-x86_64.zip
+            dist/selfhost-windows-x86_64.zip/selfhost-windows-x86_64.zip.sha256
+            dist/selfhost-windows-aarch64.zip/selfhost-windows-aarch64.zip
+            dist/selfhost-windows-aarch64.zip/selfhost-windows-aarch64.zip.sha256
+            LICENSE
