@@ -21,6 +21,35 @@ from `https://cli.selfhost.dev` (S3 + CloudFront; infrastructure in
 
 Breaking either rule makes the 5-minute TTL unsafe. Don't.
 
+## CloudFront access logs
+
+The distribution writes classic access logs to `selfhost-cli-cf-logs-<account>`
+under the `cloudfront/` prefix. That bucket is **not** part of the
+CloudFormation stack: classic logging needs an ACL grant to the S3 log
+delivery group, which in turn needs two public-access-block switches relaxed
+on that one bucket. Left outside the stack, a stack update can never tighten
+them back and silently stop log delivery.
+
+Recreating it by hand, in this order:
+
+```sh
+bucket=selfhost-cli-cf-logs-<account>
+aws s3api create-bucket --bucket "$bucket" --region us-east-1
+aws s3api put-public-access-block --bucket "$bucket" \
+  --public-access-block-configuration \
+  BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-ownership-controls --bucket "$bucket" \
+  --ownership-controls 'Rules=[{ObjectOwnership=BucketOwnerPreferred}]'
+aws s3api put-bucket-acl --bucket "$bucket" \
+  --grant-write URI='http://acs.amazonaws.com/groups/s3/LogDelivery' \
+  --grant-read-acp URI='http://acs.amazonaws.com/groups/s3/LogDelivery'
+```
+
+Then allow `s3:PutObject` from `cloudfront.amazonaws.com` on `cloudfront/*`,
+scoped by `AWS:SourceArn` to this account's distributions. Both switches must
+stay `false` or delivery stops; the bucket holds logs only and is never
+publicly readable.
+
 ## Manifest shape
 
 ```json

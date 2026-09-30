@@ -250,9 +250,9 @@ Resources:
           GeoRestriction:
             RestrictionType: none
         Logging:
-          Bucket: !Sub
-            - "${LogBucket}.s3.amazonaws.com"
-            - LogBucket: ${EdgeLogBucket}
+          # The log bucket is managed outside this stack (see the note below);
+          # its name is built here so CloudFront keeps writing to it.
+          Bucket: !Sub "selfhost-cli-cf-logs-${AWS::AccountId}.s3.amazonaws.com"
           IncludeCookies: false
           Prefix: cloudfront/
 
@@ -281,45 +281,12 @@ Resources:
             Override: true
             ContentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'"
 
-  EdgeLogBucket:
-    Type: AWS::S3::Bucket
-    Condition: CreateEdge
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
-    Properties:
-      BucketName: !Sub "selfhost-cli-cf-logs-${AWS::AccountId}"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-
-  EdgeLogBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Condition: CreateEdge
-    Properties:
-      Bucket: !Ref EdgeLogBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AllowCloudFrontLogs
-            Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
-            Action: s3:PutObject
-            Resource: !Sub "${EdgeLogBucket.Arn}/cloudfront/*"
-            Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub
-                  - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
-                  - DistId: ${EdgeDistribution}
+  # The CloudFront access-log bucket (selfhost-cli-cf-logs-<account>) is
+  # deliberately not part of this stack. Classic logging needs an ACL grant
+  # to the CloudFront log-delivery group, which also requires relaxing two
+  # public-access-block switches on that one bucket; keeping it outside the
+  # stack means a stack update can never tighten those back and silently
+  # stop log delivery. It is created and configured separately.
 
 Conditions:
   CreateOidcProvider: !Equals [!Ref OACId, ""]
