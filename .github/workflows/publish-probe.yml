@@ -1,0 +1,49 @@
+name: Publish probe
+
+# Temporary. Proves the OIDC trust, the role's permissions and the bucket
+# before a real `v*` release depends on them, without cutting a release:
+# a `probe-*` tag does not match release.yml's `v*` filter, so this is the
+# only workflow a probe tag starts. Deleted once it has run.
+on:
+  push:
+    tags:
+      - "probe-*"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Prove the upload path
+    if: github.repository == 'selfhost-dev/selfhost-cli'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Assume the publisher role through GitHub's OIDC provider
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          # Same secret the release workflow uses, so this proves that exact
+          # wiring. The ARN stays out of the file: it carries the account ID.
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+          mask-aws-account-id: true
+
+      - name: Write a scratch object and read it back
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deliberately no `aws sts get-caller-identity`: it prints the AWS
+          # account ID and these logs are public. `head-object` proves the
+          # write happened without echoing the identity.
+          echo "probe ${GITHUB_RUN_ID} at $(date -u +%Y-%m-%dT%H:%M:%SZ)" > probe.txt
+          aws s3 cp probe.txt s3://selfhost-cli-distribution-prod/pipeline-probe.txt \
+            --content-type "text/plain" --cache-control "no-store"
+          aws s3api head-object \
+            --bucket selfhost-cli-distribution-prod \
+            --key pipeline-probe.txt \
+            --query 'LastModified' --output text
+          echo "the publish path works"

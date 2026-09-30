@@ -509,3 +509,204 @@ jobs:
             dist/selfhost-windows-aarch64.zip/selfhost-windows-aarch64.zip
             dist/selfhost-windows-aarch64.zip/selfhost-windows-aarch64.zip.sha256
             LICENSE
+
+  upload-distribution:
+    name: Upload the distribution to cli.selfhost.dev
+    needs: [release, validate-release-source]
+    if: github.repository == 'selfhost-dev/selfhost-cli' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - *require-release-admins
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download every build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist
+
+      - name: Assume the publisher role through GitHub's OIDC provider
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          # The ARN carries the AWS account ID and this repository is public,
+          # so it lives in a repository *secret* and never in this file. The
+          # trust policy on the role accepts only tag pushes in this
+          # repository, and the credentials are short-lived.
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+          # Belt and braces: the action masks the account ID in its own logs.
+          mask-aws-account-id: true
+
+      - name: Upload versioned binaries and checksums
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-release-source.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Write-once: if a path already exists, an earlier release published
+          # it and this run must not touch it. Refuse instead of overwrite.
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64 \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            if aws s3api head-object \
+                 --bucket selfhost-cli-distribution-prod \
+                 --key "v${VERSION}/${name}" >/dev/null 2>&1; then
+              echo "::error::v${VERSION}/${name} already exists in the distribution bucket -- refusing to overwrite an immutable path"
+              exit 1
+            fi
+          done
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64
+          do
+            aws s3 cp "dist/${name}/${name}" \
+              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}" \
+              --content-type "application/octet-stream" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+          for name in \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            aws s3 cp "dist/${name}/${name}" \
+              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}" \
+              --content-type "application/zip" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64 \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            aws s3 cp "dist/${name}/${name}.sha256" \
+              "s3://selfhost-cli-distribution-prod/v${VERSION}/${name}.sha256" \
+              --content-type "text/plain; charset=utf-8" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
+      - name: Upload the installers and regenerate the manifest
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-release-source.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The mutable pointers describe the *stable* release. A pre-release
+          # tag (validation only stops a tag that disagrees with Cargo.toml,
+          # and Cargo.toml may legitimately hold `0.2.0-rc1`) would otherwise
+          # repoint every install at a candidate build.
+          case "$VERSION" in
+            *-*)
+              echo "v${VERSION} is a pre-release: binaries are published, latest.json is left pointing at the stable release"
+              exit 0
+              ;;
+          esac
+          # The manifest is generated, never hand-edited: URLs and digests come
+          # from the artifacts this run just verified and uploaded, so the
+          # manifest cannot drift from the binaries.
+          python3 - "$VERSION" <<'PY' > latest.json
+          import hashlib, json, sys
+
+          version = sys.argv[1]
+          names = [
+              "selfhost-linux-x86_64",
+              "selfhost-linux-aarch64",
+              "selfhost-macos-x86_64",
+              "selfhost-macos-aarch64",
+              "selfhost-windows-x86_64.zip",
+              "selfhost-windows-aarch64.zip",
+          ]
+          platforms = {
+              "selfhost-linux-x86_64": "linux-x86_64",
+              "selfhost-linux-aarch64": "linux-aarch64",
+              "selfhost-macos-x86_64": "macos-x86_64",
+              "selfhost-macos-aarch64": "macos-aarch64",
+              "selfhost-windows-x86_64.zip": "windows-x86_64",
+              "selfhost-windows-aarch64.zip": "windows-aarch64",
+          }
+          assets, sha256 = {}, {}
+          for name in names:
+              with open(f"dist/{name}/{name}", "rb") as fh:
+                  digest = hashlib.sha256(fh.read()).hexdigest()
+              assets[platforms[name]] = f"https://cli.selfhost.dev/v{version}/{name}"
+              sha256[platforms[name]] = digest
+          print(json.dumps(
+              {
+                  "version": version,
+                  "notes": f"selfhost {version}. Binaries for six platforms, each with a SHA-256 checksum sidecar.",
+                  "assets": assets,
+                  "sha256": sha256,
+              },
+              indent=2,
+          ))
+          PY
+          aws s3 cp latest.json s3://selfhost-cli-distribution-prod/latest.json \
+            --content-type "application/json" \
+            --cache-control "public, max-age=300"
+          aws s3 cp distribution/install.sh s3://selfhost-cli-distribution-prod/install.sh \
+            --content-type "text/x-shellscript" \
+            --cache-control "public, max-age=300"
+          aws s3 cp distribution/install.ps1 s3://selfhost-cli-distribution-prod/install.ps1 \
+            --content-type "text/plain" \
+            --cache-control "public, max-age=300"
+          aws s3 cp distribution/install.cmd s3://selfhost-cli-distribution-prod/install.cmd \
+            --content-type "text/plain" \
+            --cache-control "public, max-age=300"
+          echo "distribution published for v${VERSION}"
+
+      - name: Check the CDN serves what was uploaded
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-release-source.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Size rather than digest: a HEAD costs nothing and still catches the
+          # failure that matters here -- an object missing from the bucket, or
+          # one the CDN is not allowed to read. The digests themselves were
+          # proven against the artifacts before the upload.
+          for name in \
+            selfhost-linux-x86_64 \
+            selfhost-linux-aarch64 \
+            selfhost-macos-x86_64 \
+            selfhost-macos-aarch64 \
+            selfhost-windows-x86_64.zip \
+            selfhost-windows-aarch64.zip
+          do
+            url="https://cli.selfhost.dev/v${VERSION}/${name}"
+            remote="$(curl -fsSI --retry 3 "$url" | tr -d '\r' \
+              | awk 'tolower($1) == "content-length:" { print $2 }')"
+            local_bytes="$(wc -c < "dist/${name}/${name}" | tr -d ' ')"
+            if [ "$remote" != "$local_bytes" ]; then
+              echo "::error::$url serves ${remote:-nothing}, the uploaded file is ${local_bytes} bytes"
+              exit 1
+            fi
+          done
+          echo "all six binaries are downloadable through the CDN at the expected size"
+
+      - name: Invalidate the mutable pointers
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The installers and the manifest carry a 5-minute TTL, so this is a
+          # latency improvement and not a correctness requirement: it makes a
+          # release reach users now instead of within five minutes. Versioned
+          # paths are write-once and are never invalidated.
+          aws cloudfront create-invalidation \
+            --distribution-id E37YM4KZPXQ3TV \
+            --paths /latest.json /install.sh /install.ps1 /install.cmd \
+            --query 'Invalidation.Status' --output text
