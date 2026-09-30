@@ -102,14 +102,18 @@ jobs:
             # Static musl binary on an x86_64 runner: it runs here.
             native: true
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             name: selfhost-linux-aarch64
-            # Cross-compiled. There is no QEMU user-mode runner on the hosted
-            # images, and standing one up to execute a musl binary would add
-            # flake to a release for a check the x86_64 Linux leg already
-            # covers. The tag/Cargo.toml validation above is what protects this
-            # target from being mislabeled.
-            native: false
+            # Native ARM64 runner (public-repo label, same free tier). The
+            # first attempt cross-compiled from an x86_64 Ubuntu runner with
+            # gcc-aarch64-linux-gnu and failed to link: that compiler bakes
+            # Ubuntu's default `-D_FORTIFY_SOURCE=3` into aws-lc-sys's C
+            # objects, emitting glibc `__*_chk` symbols that musl's libc.a
+            # does not define. Building natively with musl-gcc -- the exact
+            # setup the x86_64 musl leg already passes with -- produces musl
+            # objects from the start, so there is no cross toolchain to get
+            # wrong and the binary can be executed for the version check.
+            native: true
           - target: x86_64-apple-darwin
             os: macos-latest
             name: selfhost-macos-x86_64
@@ -160,6 +164,7 @@ jobs:
 
       - name: Prefer the canonical Ubuntu mirrors over Azure
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           if [ -f /etc/apt/apt-mirrors.txt ]; then
             sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
@@ -169,19 +174,23 @@ jobs:
 
       - name: Install Linux build tools
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           sudo apt-get update
           # musl-tools provides the musl-gcc driver. cmake and ninja-build build
-          # aws-lc-sys, which is the only C dependency in the tree.
-          # gcc-aarch64-linux-gnu is the aarch64 cross compiler and linker.
-          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu
+          # aws-lc-sys, which is the only C dependency in the tree. Both Linux
+          # legs run natively now, so musl-gcc is the C compiler for both and
+          # no cross toolchain is installed.
+          sudo apt-get install -y cmake ninja-build musl-tools
 
       - name: Install macOS build tools
         if: runner.os == 'macOS'
+        shell: bash
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ninja
 
       - name: Install NASM for the x86_64 Windows target
         if: runner.os == 'Windows' && matrix.target == 'x86_64-pc-windows-msvc'
+        shell: bash
         run: choco install nasm --version=3.2.0 --require-checksums --no-progress -y
         # aws-lc-sys ships pre-generated NASM sources for win-x86_64 only, and
         # its build script fails outright when nasm is missing rather than
@@ -196,29 +205,27 @@ jobs:
 
       - name: Prefer the Ninja cmake generator
         if: runner.os != 'Windows'
+        shell: bash
         run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
         # Ninja is markedly faster than the default Unix Makefiles generator for
         # aws-lc-sys on both Linux and macOS. Windows is left on cmake's default
         # Visual Studio generator on purpose: that is the generator aws-lc-sys's
         # own Windows build script is written around.
 
-      - name: Set the musl C toolchain and the aarch64 linker
+      - name: Set the musl C toolchain for both Linux legs
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           {
             # aws-lc-sys compiles C through the `cc` crate, which derives the
             # compiler from the target triple. For aarch64-unknown-linux-musl it
-            # would look for `aarch64-linux-musl-gcc`, which no distro ships, so
-            # name the real cross compiler. The objects it produces are plain
-            # aarch64 ELF; rustc links them into its self-contained static musl
-            # binary and resolves libc from there.
-            echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc"
-            # musl-tools ships only musl-gcc, which the `cc` crate would find on
-            # its own; naming it keeps both musl legs spelled the same way.
+            # would look for `aarch64-linux-musl-gcc`, which no distro ships;
+            # for x86_64 it would find musl-gcc on its own. Naming musl-gcc for
+            # both keeps the two legs spelled the same way: the C objects are
+            # musl objects from the start, and rustc links them into its
+            # self-contained static musl binary, resolving libc from there.
             echo "CC_x86_64_unknown_linux_musl=musl-gcc"
-            # The aarch64 leg also needs a linker: rustc cannot
-            # self-contained-link a target the host gcc has no driver for.
-            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc"
+            echo "CC_aarch64_unknown_linux_musl=musl-gcc"
           } >> "$GITHUB_ENV"
 
       - name: Restore the Rust build cache
@@ -230,6 +237,7 @@ jobs:
 
       - name: Ensure x86_64 binaries can execute on this runner
         if: matrix.target == 'x86_64-apple-darwin'
+        shell: bash
         run: |
           # Probe the capability rather than trusting the installer's exit code.
           # macos-latest already has Rosetta baked in at image build time, and
@@ -252,6 +260,13 @@ jobs:
       - name: Build
         env:
           TARGET: ${{ matrix.target }}
+        # shell: bash is not cosmetic. With no shell set, Windows steps run
+        # under pwsh, where `"$TARGET"` is an *undefined PowerShell variable*
+        # (an env var is `$env:TARGET`) -- cargo received `--target ""` and
+        # failed with `error: target was empty`. Bash expands `$TARGET` from
+        # the step env. Every run: in this file names its shell so nothing
+        # depends on the runner default.
+        shell: bash
         run: cargo build --release --locked --target "$TARGET"
         # --locked keeps the release reproducible from the committed Cargo.lock.
         # Matrix values reach every script below through a step-level `env:`
