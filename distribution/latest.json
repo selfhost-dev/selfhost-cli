@@ -1,0 +1,20 @@
+{
+  "version": "0.1.0",
+  "notes": "Initial release. Installable binaries for six platforms, each with a SHA-256 checksum sidecar.",
+  "assets": {
+    "linux-x86_64": "https://cli.selfhost.dev/v0.1.0/selfhost-linux-x86_64",
+    "linux-aarch64": "https://cli.selfhost.dev/v0.1.0/selfhost-linux-aarch64",
+    "macos-x86_64": "https://cli.selfhost.dev/v0.1.0/selfhost-macos-x86_64",
+    "macos-aarch64": "https://cli.selfhost.dev/v0.1.0/selfhost-macos-aarch64",
+    "windows-x86_64": "https://cli.selfhost.dev/v0.1.0/selfhost-windows-x86_64.zip",
+    "windows-aarch64": "https://cli.selfhost.dev/v0.1.0/selfhost-windows-aarch64.zip"
+  },
+  "sha256": {
+    "linux-x86_64": "570cdf2a4c4697f7f5afef7238f37dfa9ebc06c56705f76f21f5ceea844fbc25",
+    "linux-aarch64": "d6cb234549bded8c011399e6dee4f3131c3db483645aa91c1cfc46e990e4d294",
+    "macos-x86_64": "0166e79de6e0a09c2a5efd1ef67c2fbf1aca9f50ea657e10462da29078ea47ba",
+    "macos-aarch64": "27c1acc1c519e3645dcc3c3e0752fe33bf72ec191c7f2e77ac916ca3d7cde947",
+    "windows-x86_64": "475d748750f1b95b297eaeba9843bf69dd7efb37dda803b64bf5f0df8e7ae54b",
+    "windows-aarch64": "e96b193bb6236dabea34cc6efb8c87a10c761f68a00da69000982229463fefe8"
+  }
+}

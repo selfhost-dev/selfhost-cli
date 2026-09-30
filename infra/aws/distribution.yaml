@@ -1,0 +1,343 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Distribution infrastructure for the selfhost CLI. Two stacks:
+
+    * distribution        (ap-south-1)  OIDC provider, GitHub uploader
+                                        role, origin bucket, bucket policy,
+                                        CloudFront Origin Access Control.
+    * distribution-edge   (us-east-1)   ACM certificate and the CloudFront
+                                        distribution serving cli.selfhost.dev.
+
+  The split exists because CloudFront only accepts ACM certificates issued
+  in us-east-1, while the bucket and IAM live in the account's home region.
+  Deploy edge last: it needs the OAC id from the first stack.
+
+  Install path security model: install.sh and latest.json are mutable
+  pointers with a 5-minute cache TTL; versioned binaries under /v<ver>/
+  are write-once and cached immutable for a year. A release never
+  overwrites an existing binary path.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: selfhost-dev
+    Description: GitHub organization or user owning the CLI repository.
+  GitHubRepo:
+    Type: String
+    Default: selfhost-cli
+    Description: GitHub repository that may assume the uploader role.
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    Description: >
+      GitHub Actions environment the token must carry. The OIDC subject
+      becomes repo:<org>/<repo>:environment:<env>, so only workflow jobs
+      that declare this environment can publish.
+  BucketName:
+    Type: String
+    Default: selfhost-cli-distribution-prod
+    Description: Origin bucket for release binaries and install scripts.
+  DomainName:
+    Type: String
+    Default: cli.selfhost.dev
+    Description: Alias served by the CloudFront distribution.
+  OACId:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Edge stack only: the Id of the OriginAccessControl created by the
+      distribution stack in ap-south-1.
+  BucketRegionalDomainName:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Edge stack only: regional domain of the origin bucket, e.g.
+      selfhost-cli-distribution-prod.s3.ap-south-1.amazonaws.com.
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # Stack: distribution (ap-south-1)
+  # -----------------------------------------------------------------------
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # GitHub rotates these; 2026 set covers both current intermediates.
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf077b5ec99790605c899ec1
+        - 3f0454fa1cf9bf48d03d6b83d05ca36fe8faab9c
+
+  UploaderRole:
+    Type: AWS::IAM::Role
+    Condition: CreateOidcProvider
+    Properties:
+      RoleName: selfhost-cli-distribution-uploader
+      Description: >
+        Assumed by GitHub Actions OIDC tokens from selfhost-dev/selfhost-cli
+        running in the production environment, to publish release artifacts
+        to the distribution bucket. Scoped to PutObject/ListBucket on one
+        bucket; no delete, no anything else.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Join
+                - ""
+                - - "arn:aws:iam::"
+                  - !Ref "AWS::AccountId"
+                  - ":oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringEqualsIfExists:
+                token.actions.githubusercontent.com:sub:
+                  Fn::Sub:
+                    - "repo:${Org}/${Repo}:environment:${Env}"
+                    - Org: !Ref GitHubOrg
+                      Repo: !Ref GitHubRepo
+                      Env: !Ref GitHubEnvironment
+      Policies:
+        - PolicyName: selfhost-cli-distribution-upload
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: !Sub "${DistributionBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DistributionBucket.Arn
+
+  DistributionBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateOidcProvider
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: CreateOidcProvider
+    Properties:
+      OriginAccessControlConfig:
+        Name: selfhost-cli-distribution-oac
+        Description: CloudFront reading the CLI distribution bucket
+        SigningProtocol: sigv4
+        SigningBehavior: always
+        OriginAccessControlOriginType: s3
+
+  DistributionBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateOidcProvider
+    Properties:
+      Bucket: !Ref DistributionBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Only the CloudFront service principal serving this distribution
+          # may read, and only through the OAC above.
+          - Sid: AllowCloudFrontOACRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${DistributionBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub
+                  - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
+                  - DistId: ${EdgeDistribution}
+          # The uploader role may write.
+          - Sid: AllowUploaderPut
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/selfhost-cli-distribution-uploader"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub "${DistributionBucket.Arn}/*"
+          # Nobody else, including anonymous principals, can do anything.
+          - Sid: DenyEverythingElse
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DistributionBucket.Arn
+              - !Sub "${DistributionBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/selfhost-cli-distribution-uploader"
+                  - !Sub
+                    - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
+                    - DistId: ${EdgeDistribution}
+
+  # -----------------------------------------------------------------------
+  # Stack: distribution-edge (us-east-1)
+  # -----------------------------------------------------------------------
+
+  EdgeCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: CreateEdge
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+
+  EdgeDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: CreateEdge
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: selfhost CLI distribution (install scripts and release binaries)
+        Aliases:
+          - !Ref DomainName
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        IPV6Enabled: true
+        DefaultRootObject: ""
+        Origins:
+          - Id: distribution-bucket
+            DomainName: !Ref BucketRegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !Ref OACId
+        DefaultCacheBehavior:
+          TargetOriginId: distribution-bucket
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # The installer and manifest override this with their own
+          # Cache-Control at upload time; binaries upload immutable. This
+          # default only catches stray paths, where we want no caching at
+          # all so a mistake is visible immediately rather than sticky.
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+        ViewerCertificate:
+          AcmCertificateArn: !Ref EdgeCertificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+        Logging:
+          Bucket: !Sub
+            - "${LogBucket}.s3.amazonaws.com"
+            - LogBucket: ${EdgeLogBucket}
+          IncludeCookies: false
+          Prefix: cloudfront/
+
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Condition: CreateEdge
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: selfhost-cli-distribution-security-headers
+        Comment: Hardened headers for a curl-piped script host
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            Override: true
+            IncludeSubdomains: true
+            Preload: true
+            AccessControlMaxAgeSec: 31536000
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            Override: true
+            FrameOption: DENY
+          ReferrerPolicy:
+            Override: true
+            ReferrerPolicy: strict-origin-when-cross-origin
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "default-src 'none'; frame-ancestors 'none'"
+
+  EdgeLogBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateEdge
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub "selfhost-cli-cf-logs-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  EdgeLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateEdge
+    Properties:
+      Bucket: !Ref EdgeLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontLogs
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${EdgeLogBucket.Arn}/cloudfront/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub
+                  - "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistId}"
+                  - DistId: ${EdgeDistribution}
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref OACId, ""]
+  CreateEdge: !Not [!Equals [!Ref OACId, ""]]
+
+Outputs:
+  UploaderRoleArn:
+    Condition: CreateOidcProvider
+    Value: !GetAtt UploaderRole.Arn
+    Description: Role for aws-actions/configure-aws-credentials in the workflow.
+  BucketName:
+    Condition: CreateOidcProvider
+    Value: !Ref DistributionBucket
+  BucketRegionalDomainName:
+    Condition: CreateOidcProvider
+    Value: !GetAtt DistributionBucket.RegionalDomainName
+  OACId:
+    Condition: CreateOidcProvider
+    Value: !Ref OriginAccessControl
+  DistributionDomainName:
+    Condition: CreateEdge
+    Value: !GetAtt EdgeDistribution.DomainName
+    Description: Target for the cli.selfhost.dev CNAME in Cloudflare.
