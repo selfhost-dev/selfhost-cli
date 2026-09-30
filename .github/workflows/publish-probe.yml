@@ -23,6 +23,27 @@ jobs:
       id-token: write
 
     steps:
+      - name: Show the OIDC claims this run presents
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Temporary diagnostic: `sub` is what the role's trust policy matches
+          # on, and GitHub has been appending immutable IDs to it. The claim
+          # carries no secret.
+          token="$(curl -fsS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          python3 - "$token" <<'PY'
+          import base64, json, sys
+
+          payload = sys.argv[1].split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          for key in ("iss", "aud", "sub", "ref", "repository", "repository_id", "event_name"):
+              print(f"{key}: {claims.get(key)}")
+          PY
+
       - name: Assume the publisher role through GitHub's OIDC provider
         uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
