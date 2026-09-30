@@ -100,7 +100,6 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringEqualsIfExists:
                 token.actions.githubusercontent.com:sub:
                   Fn::Sub:
                     - "repo:${Org}/${Repo}:environment:${Env}"
@@ -113,9 +112,7 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:PutObjectAcl
+                Action: s3:PutObject
                 Resource: !Sub "${DistributionBucket.Arn}/*"
               - Effect: Allow
                 Action: s3:ListBucket
@@ -178,9 +175,7 @@ Resources:
             Effect: Allow
             Principal:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/selfhost-cli-distribution-uploader"
-            Action:
-              - s3:PutObject
-              - s3:PutObjectAcl
+            Action: s3:PutObject
             Resource: !Sub "${DistributionBucket.Arn}/*"
           # Nobody else, including anonymous principals, can do anything.
           - Sid: DenyEverythingElse

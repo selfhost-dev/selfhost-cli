@@ -111,6 +111,13 @@ main() {
     if [ -z "$URL" ]; then
         err "release manifest does not include a binary for ${TARGET}"
     fi
+    # Origin pin: the manifest decides *which* release, never *where from*.
+    # A tampered manifest must not redirect the download off cli.selfhost.dev
+    # with a self-consistent checksum.
+    case "$URL" in
+        https://cli.selfhost.dev/*) ;;
+        *) err "manifest points at an unexpected location: ${URL}" ;;
+    esac
     if [ "${#SHA256}" -ne 64 ]; then
         err "release manifest does not include a valid SHA-256 checksum for ${TARGET}"
     fi

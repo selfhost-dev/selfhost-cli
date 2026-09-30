@@ -39,10 +39,15 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
 Info "detected windows/$arch"
 
 Info "fetching release manifest..."
-try {
-    $manifest = Invoke-RestMethod -Uri $ManifestUrl -TimeoutSec 20 -RetryCount 3
-} catch {
-    Fail "can't reach $ManifestUrl. Please try again later."
+$manifest = $null
+foreach ($attempt in 1..3) {
+    try {
+        $manifest = Invoke-RestMethod -Uri $ManifestUrl -TimeoutSec 20
+        break
+    } catch {
+        if ($attempt -eq 3) { Fail "can't reach $ManifestUrl. Please try again later." }
+        Start-Sleep -Seconds $attempt
+    }
 }
 
 $assetKey = "windows-$arch"
@@ -51,11 +56,15 @@ $sha = $manifest.sha256.$assetKey
 $version = $manifest.version
 
 if (-not $asset) { Fail "release manifest does not include a binary for $assetKey" }
+# Origin pin: the manifest decides *which* release, never *where from*.
+if ($asset -cnotlike "https://cli.selfhost.dev/*") {
+    Fail "manifest points at an unexpected location: $asset"
+}
 if (-not ($sha -cmatch '^[0-9a-fA-F]{64}$')) { Fail "release manifest does not include a valid SHA-256 checksum for $assetKey" }
 
 if ($version) { Info "downloading v$version..." } else { Info "downloading latest release..." }
 
-$tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP "selfhost-install-$(Get-Random)")
+$tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ('selfhost-install-' + [guid]::NewGuid().ToString('N')))
 try {
     $zipPath = Join-Path $tmp "selfhost.zip"
     try {
