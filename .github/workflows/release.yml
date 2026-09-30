@@ -541,7 +541,7 @@ jobs:
           path: dist
 
       - name: Assume the AWS uploader role via OIDC
-        uses: aws-actions/configure-aws-credentials@61815dcd50bd04116d70fd4a7139cb82a7e42f35 # v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: ${{ vars.DISTRIBUTION_ROLE_ARN }}
           aws-region: ap-south-1
@@ -678,7 +678,7 @@ jobs:
     steps:
       - *require-release-admins
       - name: Assume the AWS uploader role via OIDC
-        uses: aws-actions/configure-aws-credentials@61815dcd50bd04116d70fd4a7139cb82a7e42f35 # v5
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: ${{ vars.DISTRIBUTION_ROLE_ARN }}
           aws-region: ap-south-1
