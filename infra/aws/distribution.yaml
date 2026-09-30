@@ -96,16 +96,17 @@ Resources:
                 - - "arn:aws:iam::"
                   - !Ref "AWS::AccountId"
                   - ":oidc-provider/token.actions.githubusercontent.com"
-            Action: sts:AssumeRole
+            Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # GitHub stamps the org and repository numeric IDs into the
+              # subject (`org@ID/repo@ID`). Both forms are accepted so the
+              # role keeps working whichever one the token carries.
+              StringLike:
                 token.actions.githubusercontent.com:sub:
-                  Fn::Sub:
-                    - "repo:${Org}/${Repo}:environment:${Env}"
-                    - Org: !Ref GitHubOrg
-                      Repo: !Ref GitHubRepo
-                      Env: !Ref GitHubEnvironment
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${GitHubEnvironment}"
+                  - !Sub "repo:${GitHubOrg}@*/${GitHubRepo}@*:environment:${GitHubEnvironment}"
       Policies:
         - PolicyName: selfhost-cli-distribution-upload
           PolicyDocument:
