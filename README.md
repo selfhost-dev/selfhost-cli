@@ -176,6 +176,16 @@ selfhost api /organizations/{org} -i --format json
 
 `api` calls any platform endpoint directly, with the profile's sign-in and organization handling, so it works under any profile. It defaults to GET and switches to POST when parameters or a body are present, unless a method is passed with `-X`. `-f` adds plain text parameters and `-F` adds typed ones, where a value starting with `@` reads a file or stdin. On a GET they become query parameters, on a write they become the JSON body, and when `--input` sends a raw body from a file or stdin they move to the query instead. `{org}` in the path is filled in with the resolved organization. `-i` includes the status line and headers in the output. `--silent` prints nothing and leaves the exit code to say how it went. `-H` adds extra headers, except the ones the CLI manages itself, which are authorization, accept, content type and content length. Those fail the command instead of being overridden or silently dropped. Output and exit codes behave like every other command.
 
+## AI agents
+
+If an agent drives the CLI, give it the skill first. It tells the agent how to sign in and pick a profile and organization. It also says which commands work today.
+
+```sh
+npx skills add selfhost-dev/selfhost-cli --skill selfhostdev
+```
+
+Run that in the repo where the agent works. The CLI still needs to be on PATH and signed in, so install the binary and run `selfhost auth login` first.
+
 ## License
 
 Apache 2.0. See LICENSE for the full text.
