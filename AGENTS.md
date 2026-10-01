@@ -2,6 +2,10 @@
 
 Working rules for coding agents in this repo. Humans may override any rule with an explicit instruction.
 
+## Worktrees
+
+- Work in a git worktree, never on `main`: `git worktree add -b <branch> <path>` before you change anything. Put the worktree at the parent directory level, never inside the repo, and run `pwd && git branch` before your first edit to confirm which tree you are in.
+
 ## Commits
 
 - Format: Conventional Commits — `type(scope): description`, e.g. `feat(tui): open welcome screen on bare invocation`.
