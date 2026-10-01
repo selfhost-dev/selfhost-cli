@@ -33,7 +33,6 @@ pub mod deploy;
 pub mod domain;
 pub mod github;
 pub mod help;
-pub mod mongo;
 pub mod mysql;
 pub mod network;
 pub mod opensearch;
@@ -1069,10 +1068,6 @@ pub enum Command {
     #[command(subcommand)]
     Mysql(mysql::MysqlCommand),
 
-    /// Managed MongoDB databases
-    #[command(subcommand)]
-    Mongo(mongo::MongoCommand),
-
     /// Managed Redis databases
     #[command(subcommand)]
     Redis(redis::RedisCommand),
@@ -1175,14 +1170,7 @@ pub struct Cli {
 }
 
 // Engine groups whose shared surface the `--help` trailer summarises.
-const ENGINE_GROUPS: [&str; 6] = [
-    "postgres",
-    "mysql",
-    "mongo",
-    "redis",
-    "clickhouse",
-    "opensearch",
-];
+const ENGINE_GROUPS: [&str; 5] = ["postgres", "mysql", "redis", "clickhouse", "opensearch"];
 
 // Root command as the binary uses it: the derive-generated tree plus the
 // generated trailer.
@@ -1224,7 +1212,7 @@ fn shared_engine_verbs(command: &clap::Command) -> Vec<String> {
 fn help_trailer(command: &clap::Command) -> String {
     let mut trailer = String::from(
         "Managed databases:\n  \
-         Each engine group (postgres, mysql, mongo, redis, clickhouse, opensearch)\n  \
+         Each engine group (postgres, mysql, redis, clickhouse, opensearch)\n  \
          manages one engine. Pass --provider aws|hetzner to create and list to\n  \
          choose the cloud it runs on (default: your profile's provider).\n\n\
          Every engine group supports:\n",
@@ -1292,7 +1280,6 @@ impl Cli {
             Command::Domain(command) => command.dispatch(),
             Command::Postgres(command) => command.dispatch(),
             Command::Mysql(command) => command.dispatch(),
-            Command::Mongo(command) => command.dispatch(),
             Command::Redis(command) => command.dispatch(),
             Command::Clickhouse(command) => command.dispatch(),
             Command::Opensearch(command) => command.dispatch(),

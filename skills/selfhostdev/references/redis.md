@@ -232,8 +232,8 @@ selfhost api /api/v1/platform/projects/prj_0123456789abcdef/databases/prj_rd_012
   is readable on `GET /aws/v1/instances/:pid` (`init_pg_pass`, `instances_controller.rb:1154-1167`).
 - **`database_name` is null and `extensions` is `[]` for Redis** in the instance serializer
   (`cloud_instance_serializer.rb:119,133,303-311`).
-- **Project database list is not filtered by engine.** `GET …/databases` returns postgres, mysql,
-  mongodb and redis rows together; filter by `db_type` client-side.
+- **Project database list is not filtered by engine.** `GET …/databases` returns postgres, mysql
+  and redis rows together; filter by `db_type` client-side.
 - **Deleting a project database needs the exact `name`**; a mismatch is 422
   (`databases_controller.rb:171-175`). The row is soft-deleted synchronously and disappears from the
   list immediately while the cleanup job runs.

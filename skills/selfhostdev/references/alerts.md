@@ -238,11 +238,6 @@ Channel response fields (`app/serializers/notification_channel_serializer.rb`):
 - **`storage` metrics need `mount_point`.** Omitted → 422
   (`app/models/alert_rule.rb:50`). The seeder's defaults use `/`
   (`app/services/alerting/default_rules_seeder.rb:36-44`).
-- **`mongodb` has no valid metrics.** `MongoAdapter.valid_metrics` is empty and
-  empty lists are skipped when building `VALID_METRICS`
-  (`app/models/alert_rule.rb:19-27`, `app/services/database_adapters/mongo_adapter.rb:54-56`),
-  so `metric_type: "mongodb.database"` is rejected even though `mongo` is a
-  supported engine.
 - **Instances cannot be created, patched or deleted over the API** — only the two
   transitions exist, and both demand `state == "alerting"`; anything else is 409,
   as is a second acknowledge of the same instance

@@ -3,7 +3,7 @@ name: selfhostdev
 description: >-
   Use this skill whenever a task touches selfhost.dev from the terminal: signing
   in, choosing a profile or organization, managing organizations, members and
-  invitations, working with managed databases (Postgres, MySQL, Mongo, Redis,
+  invitations, working with managed databases (Postgres, MySQL, Redis,
   ClickHouse, OpenSearch), servers, projects, deployments, domains, networking or
   billing, or calling any platform endpoint directly. Trigger it when the user
   mentions selfhost, selfhost.dev or api.selfhost.dev, and also when they only
@@ -82,7 +82,6 @@ reference that maps its future verbs to the real endpoints:
 | --- | --- |
 | `postgres` | [references/postgresql.md](references/postgresql.md) |
 | `mysql` | [references/mysql.md](references/mysql.md) |
-| `mongo` | [references/mongodb.md](references/mongodb.md) |
 | `redis` | [references/redis.md](references/redis.md) |
 | `clickhouse` | [references/clickhouse.md](references/clickhouse.md) |
 | `opensearch` | [references/opensearch.md](references/opensearch.md) |
@@ -251,7 +250,7 @@ Load only what the task needs:
 | --- | --- |
 | [references/commands.md](references/commands.md) | running a live group whose flags this skill does not name — it is the full surface |
 | [references/api.md](references/api.md) | any raw `api` work: method defaulting, field typing, headers, output, exit codes |
-| [postgresql.md](references/postgresql.md), [mysql.md](references/mysql.md), [mongodb.md](references/mongodb.md), [redis.md](references/redis.md), [clickhouse.md](references/clickhouse.md), [opensearch.md](references/opensearch.md) | provisioning or day-2 work on that engine, whether a managed project database or a cloud instance |
+| [postgresql.md](references/postgresql.md), [mysql.md](references/mysql.md), [redis.md](references/redis.md), [clickhouse.md](references/clickhouse.md), [opensearch.md](references/opensearch.md) | provisioning or day-2 work on that engine, whether a managed project database or a cloud instance |
 | [projects.md](references/projects.md), [services.md](references/services.md), [catalog.md](references/catalog.md) | managed project servers, template services, and choosing a region, instance type, storage or price |
 | [deploys.md](references/deploys.md), [github.md](references/github.md), [domains.md](references/domains.md) | shipping a repository, connecting GitHub, attaching custom domains |
 | [billing.md](references/billing.md), [cloud.md](references/cloud.md), [network.md](references/network.md), [ssh-keys.md](references/ssh-keys.md), [alerts.md](references/alerts.md), [scaling.md](references/scaling.md), [webhooks.md](references/webhooks.md) | wallet and top-ups, cloud credentials, VPCs and security groups, SSH keys and access, alerting, capacity, outbound webhooks |

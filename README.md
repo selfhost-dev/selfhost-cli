@@ -151,7 +151,7 @@ Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it
 | ⏳ deploy | Deploy a repo, watch runs, set env vars and domains |
 | ⏳ github | Connected repos, branches, build settings |
 | ⏳ domain | Custom domains and their DNS status |
-| ⏳ postgres, mysql, mongo, redis, clickhouse, opensearch | Managed databases, one group per engine |
+| ⏳ postgres, mysql, redis, clickhouse, opensearch | Managed databases, one group per engine |
 | ⏳ catalog | Regions, instance types, cost estimates |
 | ⏳ billing | Wallet, top-ups, transactions |
 | ⏳ cloud | Cloud provider credentials |
