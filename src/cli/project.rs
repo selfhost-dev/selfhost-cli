@@ -8,7 +8,7 @@ use super::*;
 // `project db create <engine>` (design §3 example).
 #[derive(Debug, Clone, Args)]
 pub struct ProjectDbCreateArgs {
-    /// Database engine (postgresql, mysql, redis, mongodb)
+    /// Database engine (postgresql, mysql, redis)
     pub engine: String,
 
     /// Project the database belongs to

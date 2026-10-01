@@ -18,7 +18,7 @@ nothing here.
 Use it when:
 
 - the typed command does not exist yet. `project`, `deploy`, `github`, `domain`,
-  `postgres`, `mysql`, `mongo`, `redis`, `clickhouse`, `opensearch`, `catalog`,
+  `postgres`, `mysql`, `redis`, `clickhouse`, `opensearch`, `catalog`,
   `billing`, `cloud`, `network`, `ssh-key`, `alert`, `scaling`, `webhook` and
   `config` answer `not implemented yet: <group> <verb>` for every verb;
 - the endpoint has no verb of its own at all;

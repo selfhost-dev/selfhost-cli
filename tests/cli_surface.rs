@@ -17,7 +17,6 @@ const TOP_LEVEL_GROUPS: &[&str] = &[
     "domain",
     "postgres",
     "mysql",
-    "mongo",
     "redis",
     "clickhouse",
     "opensearch",
@@ -192,29 +191,6 @@ const ENGINE_VERBS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "mongo",
-        &[
-            "list",
-            "show",
-            "create",
-            "delete",
-            "start",
-            "stop",
-            "reboot",
-            "fork",
-            "resize",
-            "scale",
-            "failover",
-            "update",
-            "wait",
-            "logs",
-            "stats",
-            "metrics",
-            "snapshots",
-            "backups",
-        ],
-    ),
-    (
         "redis",
         &[
             "list",
@@ -373,7 +349,7 @@ fn help_trailer_lists_only_shared_engine_verbs() {
         }
     }
 
-    // …and it must not omit a verb that all six do have.
+    // …and it must not omit a verb that all five do have.
     let mut shared = commands_with_about(&help_of(ENGINE_VERBS[0].0))
         .into_iter()
         .map(|(name, _)| name)

@@ -305,7 +305,6 @@ selfhost postgres users list   # not implemented yet: postgres users list
 | `domain` | 5 | 1 |
 | `postgres` | 54 | 11 |
 | `mysql` | 43 | 7 |
-| `mongo` | 24 | 3 |
 | `redis` | 29 | 4 |
 | `clickhouse` | 33 | 5 |
 | `opensearch` | 32 | 5 |
@@ -318,7 +317,7 @@ selfhost postgres users list   # not implemented yet: postgres users list
 | `scaling` | 8 | 2 |
 | `webhook` | 5 | 1 |
 | `config` | 5 | 1 |
-| **Total** | **359** | **76** |
+| **Total** | **335** | **73** |
 
 Verbs = leaf commands under the group in `selfhost tree`; registrations =
 `grep -c "stub_group!" src/cli/<group>.rs`. A group invoked with no subcommand

@@ -6,7 +6,7 @@ list|show|create|update|delete|metrics|activities`,
 `project db|service|backup|snapshot|ssh …`) answer `not implemented yet`, so
 drive the platform API with `selfhost api` and the paths below. A project's pid
 is `prj_` + ULID (`app/models/coolify_project.rb:326`); its children have their
-own pids (`prj_pg_…`, `prj_mo_…`, `prj_svc_…`). No route here carries `{org}`:
+own pids (`prj_pg_…`, `prj_svc_…`). No route here carries `{org}`:
 scoping is the `organization_id` parameter the CLI injects (see
 [api.md](api.md)), read by name at
 `app/controllers/api/v1/platform/coolify_projects_controller.rb:346`.
@@ -46,7 +46,7 @@ scoping is the `organization_id` parameter the CLI injects (see
 ### The project's databases
 
 Creation, deletion and container logs/stats live in the engine references:
-[`postgresql.md`](postgresql.md), [`mysql.md`](mysql.md), [`mongodb.md`](mongodb.md),
+[`postgresql.md`](postgresql.md), [`mysql.md`](mysql.md),
 [`redis.md`](redis.md), [`clickhouse.md`](clickhouse.md),
 [`opensearch.md`](opensearch.md) — they document
 `POST …/projects/:project_id/databases/:db_type`,
