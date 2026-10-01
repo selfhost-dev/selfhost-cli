@@ -463,26 +463,35 @@ fn classify(status: reqwest::StatusCode, body: &str) -> Result<Value> {
     }
 }
 
-/// One classified raw body: envelope `data`, or raw text when the body is not
-/// JSON. `null` data prints as `null`, like the typed path's JSON.
+/// One classified raw body: the full response envelope, or raw text when the
+/// body is not JSON. An empty JSON success body prints as `null`, like the
+/// typed path's JSON.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RawData {
-    /// Envelope `data` (or `Null` for an empty JSON success body).
+    /// Full envelope object (or `Null` for an empty JSON success body).
     Json(Value),
     /// A non-JSON body, printed as raw text.
     Text(String),
 }
 
-/// [`classify`] for [`ApiClient::raw`]: the same envelope contract and error
-/// map (401, 402, 429, everything else with its HTTP code), except a success
-/// body that is not JSON comes back as [`RawData::Text`] instead of
-/// succeeding with `Null`.
+/// [`classify`] for [`ApiClient::raw`]: the same error map (401, 402, 429,
+/// everything else with its HTTP code), except success keeps the full
+/// `{status,data}` envelope instead of unwrapping to `data`. A success body
+/// that is not JSON comes back as [`RawData::Text`] instead of succeeding
+/// with `Null`.
 pub fn classify_raw(status: reqwest::StatusCode, body: &str) -> Result<RawData> {
     if body.trim().is_empty() {
         return classify(status, body).map(RawData::Json);
     }
     match serde_json::from_str::<Value>(body) {
-        Ok(Value::Object(_)) => classify(status, body).map(RawData::Json),
+        Ok(value @ Value::Object(_)) => {
+            let envelope_status = value.get("status").and_then(Value::as_str);
+            if status.is_success() && envelope_status != Some("error") {
+                Ok(RawData::Json(value))
+            } else {
+                Err(classify(status, body).unwrap_err())
+            }
+        }
         // Not the envelope shape (plain text, HTML, a bare array): errors with
         // a status still classify, successes print the raw text.
         Ok(_) => {
@@ -984,5 +993,112 @@ mod tests {
         let request = drain(&captured).join("");
         assert_eq!(request.matches("organization_id=").count(), 1, "{request}");
         assert!(request.contains("organization_id=org_x"), "{request}");
+    }
+
+    /// Issue #9: `selfhost api -o json` must keep the documented
+    /// `{status,data}` envelope so every `.data.*` jq path works.
+    /// Today `classify_raw` unwraps to `data` and these fail.
+    #[test]
+    fn raw_success_envelope_keeps_status_and_data_for_projects() {
+        let body =
+            r#"{"status":"success","data":{"projects":[]},"message":null,"status_code":200}"#;
+        match classify_raw(status(200), body).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(value["status"], serde_json::json!("success"), "{value}");
+                assert_eq!(value["data"]["projects"], serde_json::json!([]), "{value}");
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
+    }
+
+    /// Issue #9: the public `server_types` shape answers
+    /// `{"status":"success","data":{"locations":[...]}}`.
+    #[test]
+    fn raw_server_types_envelope_keeps_data_locations() {
+        let body = r#"{"status":"success","data":{"locations":[{"code":"fsn1"}]},"message":null,"status_code":200}"#;
+        match classify_raw(status(200), body).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(value["status"], serde_json::json!("success"), "{value}");
+                assert_eq!(
+                    value["data"]["locations"][0]["code"],
+                    serde_json::json!("fsn1"),
+                    "{value}"
+                );
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
+    }
+
+    /// Issue #9: service-create 202 body is `data.service`, not bare `service`.
+    #[test]
+    fn raw_service_create_202_keeps_data_service_pid() {
+        let body = r#"{"status":"success","data":{"service":{"pid":"prj_svc_1"}},"message":null,"status_code":202}"#;
+        match classify_raw(status(202), body).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(
+                    value["data"]["service"]["pid"],
+                    serde_json::json!("prj_svc_1"),
+                    "{value}"
+                );
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
+    }
+
+    /// Issue #9: container-fetch dispatch 202 is `data.fetch`, poll is `data.fetches`.
+    #[test]
+    fn raw_fetch_dispatch_202_keeps_data_fetch_pid() {
+        let dispatch = r#"{"status":"success","data":{"fetch":{"pid":"fetch_1","status":"pending"}},"message":null,"status_code":202}"#;
+        match classify_raw(status(202), dispatch).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(
+                    value["data"]["fetch"]["pid"],
+                    serde_json::json!("fetch_1"),
+                    "{value}"
+                );
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
+
+        let poll = r#"{"status":"success","data":{"fetches":[{"pid":"fetch_1","status":"completed"}]},"message":null,"status_code":200}"#;
+        match classify_raw(status(200), poll).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(
+                    value["data"]["fetches"][0]["status"],
+                    serde_json::json!("completed"),
+                    "{value}"
+                );
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
+    }
+
+    /// Issue #9, live wire: `raw` + `classify_raw` keeps the envelope end to end.
+    #[tokio::test]
+    async fn live_raw_success_envelope_returns_full_envelope() {
+        let body = r#"{"status":"success","data":{"projects":[{"pid":"prj_1"}]},"message":null,"status_code":200}"#;
+        let (base, _captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let response = client(&base)
+            .raw(
+                reqwest::Method::GET,
+                "/api/v1/platform/projects",
+                &[],
+                None,
+                &[],
+            )
+            .await
+            .unwrap();
+        match classify_raw(response.status, &response.body).unwrap() {
+            RawData::Json(value) => {
+                assert_eq!(value["status"], serde_json::json!("success"), "{value}");
+                assert_eq!(
+                    value["data"]["projects"][0]["pid"],
+                    serde_json::json!("prj_1"),
+                    "{value}"
+                );
+            }
+            other => panic!("expected Json envelope, got {other:?}"),
+        }
     }
 }

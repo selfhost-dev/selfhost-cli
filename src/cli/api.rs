@@ -61,7 +61,7 @@ pub struct ApiArgs {
 }
 
 /// `selfhost api`: validate everything, resolve the organization, send one raw
-/// request and print the envelope data (or the raw text for non-JSON bodies).
+/// request and print the response envelope (or the raw text for non-JSON bodies).
 pub async fn run(global: &GlobalArgs, args: ApiArgs) -> Result<()> {
     let sends_fields = !args.raw_fields.is_empty() || !args.fields.is_empty();
     let method = resolve_method(args.method.as_deref(), sends_fields || args.input.is_some())?;
@@ -384,7 +384,7 @@ fn render_text(global: &GlobalArgs, text: &str) -> String {
     }
 }
 
-/// The response body for `--include`: envelope data rendered in the resolved
+/// The response body for `--include`: the envelope rendered in the resolved
 /// format, raw text otherwise.
 fn render_body(global: &GlobalArgs, data: &RawData) -> Result<String> {
     match data {
