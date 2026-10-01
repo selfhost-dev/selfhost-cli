@@ -12,6 +12,7 @@ mod config;
 mod error;
 mod output;
 mod tui;
+mod update;
 mod watch;
 
 use std::process::ExitCode;

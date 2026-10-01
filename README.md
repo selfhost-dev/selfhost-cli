@@ -32,7 +32,14 @@ It unpacks `selfhost.exe` into `%LOCALAPPDATA%\Programs\selfhost` and adds that 
 
 ### Upgrading and pinning a version
 
-Running the installer again replaces the binary with the newest stable release. The installer has no version pin, so it never fetches a pre-release. Each pre-release tag publishes its own binaries on the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases): download the file for your platform and put it on your PATH.
+```sh
+selfhost update             # install the newest release over the one you have
+selfhost update --check     # just say whether there is one
+```
+
+`update` downloads the build for your platform, checks it against the SHA-256 the release list publishes, and replaces the running binary. It never asks for administrator rights: if it cannot write where the binary sits, it prints the installer command that can and stops. Set `SELFHOST_MANIFEST_URL` to read a different release list — the installer honours the same name.
+
+The installer stays the way to install into a directory the CLI cannot write, and to move the binary somewhere else in the first place. It has no version pin, so it never fetches a pre-release; `update` follows the same rule and leaves a pre-release build alone. Each pre-release tag publishes its own binaries on the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases): download the file for your platform and put it on your PATH.
 
 ### Checking what you installed
 
@@ -154,6 +161,7 @@ Name an organization by slug (`acme`) or by pid (`org_…`). A pid is used as it
 | tui | The interactive terminal UI |
 | tree | Every command, one per line |
 | completion | Shell completions for bash, zsh, fish |
+| update | Move this CLI to the newest published build |
 
 Every command takes the same global flags: `--profile`, `--base-url`, `--org`, `-o/--format`, `--json`, `--no-color`, `--timeout`, `--poll-interval`, `-y/--yes`, `--dry-run`, `-q/--quiet`, `-v/--verbose`, `--debug`.
 
