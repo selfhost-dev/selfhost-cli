@@ -14,10 +14,10 @@ curl -fsSL https://cli.selfhost.dev/install.sh | sh
 
 The installer works out your platform and downloads the matching build from `cli.selfhost.dev`. It checks the SHA-256 against the release manifest before it writes the binary to `~/.local/bin`. If that directory is not on your PATH, the installer prints what to add. You need `curl`, `awk`, and one of `sha256sum`, `shasum` or `openssl`.
 
-To install somewhere else, set the directory first:
+To install somewhere else, name the directory on `sh`, the command at the end of the pipe. Put it in front of `curl` and it never reaches the installer:
 
 ```sh
-SELFHOST_INSTALL_DIR=/usr/local/bin curl -fsSL https://cli.selfhost.dev/install.sh | sh
+curl -fsSL https://cli.selfhost.dev/install.sh | SELFHOST_INSTALL_DIR=/usr/local/bin sh
 ```
 
 ### Windows
