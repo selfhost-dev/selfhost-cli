@@ -6,6 +6,47 @@ This project is young. The full command tree exists and every command has help, 
 
 ## Install
 
+### macOS and Linux
+
+```sh
+curl -fsSL https://cli.selfhost.dev/install.sh | sh
+```
+
+The installer works out your platform, downloads that build from `cli.selfhost.dev`, checks its SHA-256 against the release manifest, and puts it in `~/.local/bin`. If that directory is not on your PATH it tells you what to add. You need `curl`, `awk`, and one of `sha256sum`, `shasum` or `openssl`.
+
+To install somewhere else, set the directory first:
+
+```sh
+SELFHOST_INSTALL_DIR=/usr/local/bin curl -fsSL https://cli.selfhost.dev/install.sh | sh
+```
+
+### Windows
+
+In PowerShell:
+
+```powershell
+irm https://cli.selfhost.dev/install.ps1 | iex
+```
+
+That unpacks `selfhost.exe` into `%LOCALAPPDATA%\Programs\selfhost` and adds it to your user PATH. In Command Prompt, run the same installer as `install.cmd` instead.
+
+### Upgrading and pinning a version
+
+Running the installer again replaces the binary with the newest release — `latest.json` is regenerated on every release. There is no version pin: the installer always takes the stable release. A pre-release build is published under its own tag, so you can install one by downloading the file for your platform from the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases) and putting it on your PATH yourself.
+
+### Checking what you installed
+
+```sh
+selfhost --version
+shasum -a 256 "$(command -v selfhost)"   # compare with the manifest at cli.selfhost.dev/latest.json
+```
+
+### Uninstalling
+
+Delete the binary and, on Windows, drop the install directory from your user PATH.
+
+### Building from source
+
 You need Rust 1.88 or newer.
 
 ```sh
