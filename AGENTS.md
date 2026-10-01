@@ -15,6 +15,17 @@ Working rules for coding agents in this repo. Humans may override any rule with 
 - One logical change per commit. Do not force-push or rewrite commits that are not yours.
 - Banned in commit messages: the word `verbatim`, and process/internal labels (`round 1`, `verifier round`, `slice N`, `WIP`). Describe the change, not the workflow that produced it.
 
+## Releases
+
+A `v*` tag is the only thing that publishes. No one uploads an artifact by hand, and the tag must point at a commit on `main`.
+
+1. Land the change through a pull request into `main`.
+2. Open a separate pull request that bumps `Cargo.toml` and `Cargo.lock` and nothing else, titled `chore(release): selfhost reports version X.Y.Z`.
+3. Create a signed annotated tag `vX.Y.Z` on that merge commit and push it. Tag creation is admin-only by ruleset, and a tag that disagrees with the `Cargo.toml` version fails the run.
+4. Verify the run: every job green, thirteen assets on the GitHub release, `https://cli.selfhost.dev/latest.json` reporting the new version, and all six platform digests matching the release artifacts.
+
+CI builds six native targets, publishes the GitHub release, uploads the distribution, and regenerates the manifest. A version containing a dash publishes binaries but deliberately leaves the manifest pointing at the stable release.
+
 ## Public surfaces and identifiers
 
 - This repository is public. Never write an AWS account ID, a role ARN, a credential, or a token into a file, a commit message, a pull request, a workflow run log, or a release note.
