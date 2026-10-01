@@ -168,6 +168,32 @@ fn the_org_placeholder_without_an_organization_names_the_fix() {
         .stderr(predicate::str::contains(NO_ORGANIZATION));
 }
 
+/// A scoped path with nothing selected anywhere stops with the hint, before a
+/// credential is needed and without a request (issue #8).
+#[test]
+fn a_scoped_path_without_an_organization_names_the_fix() {
+    let home = TempHome::new();
+
+    selfhost(&home)
+        .args(["api", "/api/v1/platform/projects"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(NO_ORGANIZATION));
+}
+
+/// Fields do not change the guard: a scoped GET carrying `-f` pairs with
+/// nothing selected stops with the hint before any credential is read.
+#[test]
+fn a_scoped_get_with_fields_without_an_organization_names_the_fix() {
+    let home = TempHome::new();
+
+    selfhost(&home)
+        .args(["api", "/v1/postgres", "-f", "limit=5"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(NO_ORGANIZATION));
+}
+
 /// `--dry-run` fails closed with the shared refusal, before any credential is
 /// read or request is sent.
 #[test]

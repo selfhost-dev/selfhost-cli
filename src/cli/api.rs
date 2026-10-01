@@ -83,7 +83,7 @@ pub async fn run(global: &GlobalArgs, args: ApiArgs) -> Result<()> {
         let profile = store.require_profile(&name)?;
         org_reference(None, global, profile).map(str::to_owned)
     };
-    if endpoint.contains("{org}") && reference.is_none() {
+    if reference.is_none() && !is_unscoped_endpoint(&endpoint) {
         return Err(no_organization_selected());
     }
     let unscoped = unscoped_client(&mut store, &name, global).await?;
@@ -335,6 +335,23 @@ fn substitute_org(path: &str, pid: Option<&str>) -> Result<String> {
     }
     let pid = pid.ok_or_else(no_organization_selected)?;
     Ok(path.replace("{org}", pid))
+}
+
+/// Whether `endpoint` may run without an organization: the identity routes
+/// that bootstrap or list organizations. Everything else is org-scoped and
+/// needs a selected organization before any credential is read. A `{org}`
+/// placeholder always needs one, even under an otherwise unscoped prefix.
+fn is_unscoped_endpoint(endpoint: &str) -> bool {
+    if endpoint.contains("{org}") {
+        return false;
+    }
+    let path = endpoint
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(endpoint);
+    ["/organizations", "/users", "/v1/me"]
+        .iter()
+        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
 }
 
 /// `--include` output: the status line, the response headers sorted by
@@ -700,6 +717,34 @@ mod tests {
         match substitute_org("/organizations/{org}/members", None).unwrap_err() {
             Error::Usage(message) => assert!(message.contains("org use"), "{message}"),
             other => panic!("expected Usage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unscoped_endpoints_cover_identity_routes_only() {
+        for endpoint in [
+            "/organizations",
+            "/organizations?page=2",
+            "/organizations/",
+            "/users",
+            "/users/memberships",
+            "/users/details",
+            "/v1/me",
+        ] {
+            assert!(
+                is_unscoped_endpoint(endpoint),
+                "{endpoint} must be unscoped"
+            );
+        }
+        for endpoint in [
+            "/v1/postgres",
+            "/api/v1/platform/projects",
+            "/",
+            "/organizations/{org}/members",
+            "/organizations123",
+            "/users123",
+        ] {
+            assert!(!is_unscoped_endpoint(endpoint), "{endpoint} must be scoped");
         }
     }
 
