@@ -46,6 +46,7 @@ pub mod scaling;
 pub mod ssh_key;
 pub mod tree;
 pub mod tui;
+pub mod update;
 pub mod webhook;
 
 // Register a command group: its clap subcommands plus the Slice 0 staging error.
@@ -1120,6 +1121,9 @@ pub enum Command {
     /// Call any platform endpoint directly
     Api(api::ApiArgs),
 
+    /// Move this CLI to the newest published build
+    Update(update::UpdateArgs),
+
     /// Open the interactive terminal UI
     Tui(tui::TuiArgs),
 
@@ -1275,6 +1279,7 @@ impl Cli {
             Command::Tui(args) => tui::run(args),
             Command::Help(args) => help::run(args),
             Command::Tree(_) => tree::run(),
+            Command::Update(args) => block_on(update::run(&global, args)),
             Command::Completion(args) => completion::run(args),
 
             Command::Auth(command) => command.dispatch(&global),

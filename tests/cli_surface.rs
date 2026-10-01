@@ -33,6 +33,7 @@ const TOP_LEVEL_GROUPS: &[&str] = &[
     "help",
     "tree",
     "completion",
+    "update",
 ];
 
 fn selfhost() -> Command {
