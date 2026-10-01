@@ -181,9 +181,13 @@ selfhost api -X GET /organizations -f per_page=50
 | `selfhost completion` | `<SHELL>`, one of `bash`, `zsh`, `fish` | Generate shell completions |
 | `selfhost help` | `[COMMAND]...` | Print help for a command path, e.g. `selfhost help postgres users` |
 
-Bare `selfhost` opens the TUI when stdin and stdout are terminals, `TERM` is not
-`dumb`, and `SELFHOSTDEV_NO_TUI` is unset or empty; otherwise it prints help
-(`src/cli/tui.rs`).
+A bare `selfhost`, with no subcommand after it, opens the TUI when stdin and
+stdout are terminals, `TERM` is not `dumb`, and `SELFHOSTDEV_NO_TUI` is unset or
+empty; otherwise it prints help (`src/cli/tui.rs`). The check runs only on that
+parse failure (`src/main.rs`), so an invocation that names a subcommand never
+consults the terminal or the variable: `selfhost api …`, `selfhost org list` and
+the rest dispatch normally however they are run, and `SELFHOSTDEV_NO_TUI=1` in
+front of one of them is inert.
 
 ## Behavior
 

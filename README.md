@@ -65,7 +65,7 @@ selfhost completion bash    # also zsh and fish
 selfhost tui                # welcome screen, needs a terminal
 ```
 
-Running bare `selfhost` on a terminal opens the welcome screen too. Press q to quit. Set `SELFHOSTDEV_NO_TUI=1` to get plain help output instead.
+Running `selfhost` with no subcommand on a terminal opens the welcome screen too. Press q to quit. Set `SELFHOSTDEV_NO_TUI=1` to make that bare call print help instead. Nothing else is affected: a command that names a subcommand runs that command and never opens the screen.
 
 ## Point it somewhere
 

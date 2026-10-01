@@ -131,8 +131,11 @@ When a typed command for the group lands later, it replaces the raw calls.
 
 ## Gotchas
 
-- A bare `selfhost` on a terminal opens the interactive TUI and waits for input.
-  In scripts and CI always pass a subcommand, or set `SELFHOSTDEV_NO_TUI=1`.
+- The TUI opens only for a bare `selfhost`, which means no subcommand after it at
+  all. Any invocation that names one, `selfhost api /organizations` included,
+  runs that command and never draws the TUI, on a terminal or not, and
+  `SELFHOSTDEV_NO_TUI=1` changes nothing there. Do not put it in front of a
+  command that already has a subcommand.
 - Most of the command tree is scaffolding: a verb can appear in `--help` and
   still answer `not implemented yet`. Confirm a group is live before promising
   the user it will work, and use that group's raw API reference from the Command
@@ -239,8 +242,8 @@ envelope shapes or worked examples.
   commands.md for the per-subject wording). Nothing was sent; rerun without the
   flag.
 - In a script, a bare `selfhost` prints the help on stderr and exits 2 instead of
-  waiting — the TUI opens only when stdin and stdout are both terminals. Always
-  pass a subcommand, and set `SELFHOSTDEV_NO_TUI=1` for safety.
+  waiting, because the TUI opens only when stdin and stdout are both terminals.
+  Nothing extra is needed once a subcommand is there: it cannot reach the TUI.
 
 ## Reference files
 
