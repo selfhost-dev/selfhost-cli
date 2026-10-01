@@ -144,10 +144,10 @@ resolved.
 
 ## Output
 
-- Default: only the `data` field of the response envelope (the payload), not
-  the envelope itself; a JSON object body with no `data` field prints `null`. A
-  success body that is not the envelope shape (plain text, HTML, a bare array)
-  is printed as raw text.
+- Default: the full response envelope (`{"status":…,"data":{…}}`), not just
+  `data`, so every documented `.data.…` jq path works. A success body that is
+  not the envelope shape (plain text, HTML, a bare array) is printed as raw
+  text.
 - `-o table|json|yaml` or `--json`: table is the default on a terminal, JSON
   when piped. Plain-text bodies keep control characters in JSON/YAML and have
   them stripped in table mode (JSON payloads are escaped by the serializer).
