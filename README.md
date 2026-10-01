@@ -182,6 +182,12 @@ selfhost api /organizations/{org} -i --format json
 
 `api` calls any platform endpoint directly, with the profile's sign-in and organization handling, so it works under any profile. It defaults to GET and switches to POST when parameters or a body are present, unless a method is passed with `-X`. `-f` adds plain text parameters and `-F` adds typed ones, where a value starting with `@` reads a file or stdin. On a GET they become query parameters, on a write they become the JSON body, and when `--input` sends a raw body from a file or stdin they move to the query instead. `{org}` in the path is filled in with the resolved organization. `-i` includes the status line and headers in the output. `--silent` prints nothing and leaves the exit code to say how it went. `-H` adds extra headers, except the ones the CLI manages itself, which are authorization, accept, content type and content length. Those fail the command instead of being overridden or silently dropped. Output and exit codes behave like every other command.
 
+JSON output is the whole envelope the platform sent, `{"status":"success","data":…,"message":…,"status_code":200}`, so a jq path reads through `.data`. Some endpoints put an object under `data` and some put a bare list. On0.2.x and older the CLI printed `data` alone, so a script written against those versions needs `.data` added.
+
+```sh
+selfhost api /organizations -o json | jq -r '.data[].slug'
+```
+
 ## License
 
 Apache 2.0. See LICENSE for the full text.
