@@ -12,7 +12,7 @@ This project is young. The full command tree exists and every command has help, 
 curl -fsSL https://cli.selfhost.dev/install.sh | sh
 ```
 
-The installer works out your platform, downloads that build from `cli.selfhost.dev`, checks its SHA-256 against the release manifest, and puts it in `~/.local/bin`. If that directory is not on your PATH it tells you what to add. You need `curl`, `awk`, and one of `sha256sum`, `shasum` or `openssl`.
+The installer works out your platform and downloads the matching build from `cli.selfhost.dev`. It checks the SHA-256 against the release manifest before it writes the binary to `~/.local/bin`. If that directory is not on your PATH, the installer prints what to add. You need `curl`, `awk`, and one of `sha256sum`, `shasum` or `openssl`.
 
 To install somewhere else, set the directory first:
 
@@ -28,17 +28,17 @@ In PowerShell:
 irm https://cli.selfhost.dev/install.ps1 | iex
 ```
 
-That unpacks `selfhost.exe` into `%LOCALAPPDATA%\Programs\selfhost` and adds it to your user PATH. In Command Prompt, run the same installer as `install.cmd` instead.
+It unpacks `selfhost.exe` into `%LOCALAPPDATA%\Programs\selfhost` and adds that directory to your user PATH. In Command Prompt, run `install.cmd`, which starts the same script through PowerShell.
 
 ### Upgrading and pinning a version
 
-Running the installer again replaces the binary with the newest release — `latest.json` is regenerated on every release. There is no version pin: the installer always takes the stable release. A pre-release build is published under its own tag, so you can install one by downloading the file for your platform from the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases) and putting it on your PATH yourself.
+Running the installer again replaces the binary with the newest stable release. The installer has no version pin, so it never fetches a pre-release. Each pre-release tag publishes its own binaries on the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases): download the file for your platform and put it on your PATH.
 
 ### Checking what you installed
 
 ```sh
 selfhost --version
-shasum -a 256 "$(command -v selfhost)"   # compare with the manifest at cli.selfhost.dev/latest.json
+shasum -a 256 "$(command -v selfhost)"   # must match the digest in https://cli.selfhost.dev/latest.json
 ```
 
 ### Uninstalling
