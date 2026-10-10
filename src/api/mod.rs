@@ -53,6 +53,15 @@ pub enum RawBody {
     Raw(Vec<u8>),
 }
 
+/// The JSON object a raw body carries, if it is one: only an object body can
+/// hold a key such as `organization_id`.
+fn json_object(body: &Option<RawBody>) -> Option<&Value> {
+    match body {
+        Some(RawBody::Json(value @ Value::Object(_))) => Some(value),
+        _ => None,
+    }
+}
+
 /// One raw response: the status, the headers and the body text, so the caller
 /// can print the status line and headers (`-i`) or just the body.
 #[derive(Debug, Clone)]
@@ -178,23 +187,21 @@ impl ApiClient {
             Some((path, query)) => (path, Some(query)),
             None => (path, None),
         };
-        // "The caller named the organization" in any of the three places a raw
+        // The caller named the organization in one of the three places a raw
         // call can: an owned query pair, the endpoint query, or a JSON object
         // body field. Naming it anywhere suppresses injection everywhere.
-        let named = query.iter().any(|(key, _)| key == "organization_id")
-            || embedded.is_some_and(|query| {
-                query
+        let body_object = json_object(&body);
+        let caller_named_org = query.iter().any(|(key, _)| key == "organization_id")
+            || embedded.is_some_and(|embedded_query| {
+                embedded_query
                     .split('&')
                     .filter_map(|pair| pair.split_once('='))
                     .any(|(key, _)| key == "organization_id")
             })
-            || matches!(
-                &body,
-                Some(RawBody::Json(Value::Object(map))) if map.contains_key("organization_id")
-            );
-        let object_body = matches!(&body, Some(RawBody::Json(Value::Object(_))));
+            || body_object.is_some_and(|body| body.get("organization_id").is_some());
+        let object_body = body_object.is_some();
         let scoped_body = body.map(|body| match body {
-            RawBody::Json(value) if !named => RawBody::Json(self.scoped_body(value)),
+            RawBody::Json(value) if !caller_named_org => RawBody::Json(self.scoped_body(value)),
             raw => raw,
         });
         let encoded = scoped_body.as_ref().map(|body| match body {
@@ -209,7 +216,7 @@ impl ApiClient {
                 .collect();
             // A JSON object body carries the organization itself, so the query
             // never gets a copy; every other request keeps the query injection.
-            let scoped_query = if named || object_body {
+            let scoped_query = if caller_named_org || object_body {
                 refs.clone()
             } else {
                 self.scoped_query(&refs)
@@ -864,6 +871,24 @@ mod tests {
             .collect()
     }
 
+    /// Run one raw call against a fresh mock server and return the request text
+    /// the server captured, so each test only owns its assertions.
+    async fn raw_request_text(
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<RawBody>,
+        org: Option<&str>,
+    ) -> String {
+        let response = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", response)]).await;
+
+        let api = client(&base).with_org(org.map(str::to_string));
+        api.raw(method, path, query, body, &[]).await.unwrap();
+
+        drain(&captured).join("")
+    }
+
     #[tokio::test]
     async fn live_success_envelope_returns_data() {
         let body = r#"{"status":"success","data":{"id":1},"message":null,"status_code":200}"#;
@@ -1011,37 +1036,35 @@ mod tests {
     /// A write whose body is a JSON object carries the caller's
     /// `organization_id` there and nowhere else: the profile's organization is
     /// not appended to the query string, so the field's value is the one the
-    /// server resolves. This is the reported false-404 shape (`-f`).
+    /// server resolves. Every write verb is pinned. This is the reported
+    /// false-404 shape (`-f`).
     #[tokio::test]
     async fn live_raw_write_field_organization_id_is_the_only_organization() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+        for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+            let request = raw_request_text(
+                method.clone(),
+                "/api/v1/platform/projects/prj_1",
+                &[],
+                Some(RawBody::Json(
+                    serde_json::json!({"organization_id": "org_other"}),
+                )),
+                Some("org_profile"),
+            )
+            .await;
 
-        let api = client(&base).with_org(Some("org_profile".to_string()));
-        api.raw(
-            reqwest::Method::DELETE,
-            "/api/v1/platform/projects/prj_1",
-            &[],
-            Some(RawBody::Json(
-                serde_json::json!({"organization_id": "org_other"}),
-            )),
-            &[],
-        )
-        .await
-        .unwrap();
-
-        let request = drain(&captured).join("");
-        let request_line = request.lines().next().unwrap_or_default();
-        assert_eq!(
-            request_line, "DELETE /api/v1/platform/projects/prj_1 HTTP/1.1",
-            "{request}"
-        );
-        assert_eq!(request.matches("organization_id").count(), 1, "{request}");
-        assert!(
-            request.contains(r#""organization_id":"org_other""#),
-            "{request}"
-        );
-        assert!(!request.contains("org_profile"), "{request}");
+            let request_line = request.lines().next().unwrap_or_default();
+            assert_eq!(
+                request_line,
+                format!("{method} /api/v1/platform/projects/prj_1 HTTP/1.1"),
+                "{request}"
+            );
+            assert_eq!(request.matches("organization_id").count(), 1, "{request}");
+            assert!(
+                request.contains(r#""organization_id":"org_other""#),
+                "{request}"
+            );
+            assert!(!request.contains("org_profile"), "{request}");
+        }
     }
 
     /// The typed `-F` value is likewise the only organization a write carries.
@@ -1049,23 +1072,17 @@ mod tests {
     /// typing path is pinned by the `plan` test in `cli::api`.
     #[tokio::test]
     async fn live_raw_typed_field_organization_id_is_the_only_organization() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
-
-        let api = client(&base).with_org(Some("org_profile".to_string()));
-        api.raw(
-            reqwest::Method::PATCH,
+        let request = raw_request_text(
+            Method::PATCH,
             "/api/v1/platform/projects/prj_1",
             &[],
             Some(RawBody::Json(
                 serde_json::json!({"organization_id": "org_other"}),
             )),
-            &[],
+            Some("org_profile"),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let request = drain(&captured).join("");
         assert!(
             request.starts_with("PATCH /api/v1/platform/projects/prj_1 HTTP/1.1"),
             "{request}"
@@ -1082,21 +1099,15 @@ mod tests {
     /// body only.
     #[tokio::test]
     async fn live_raw_write_without_field_organization_injects_into_the_body_only() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
-
-        let api = client(&base).with_org(Some("org_1".to_string()));
-        api.raw(
-            reqwest::Method::POST,
+        let request = raw_request_text(
+            Method::POST,
             "/v1/postgres",
             &[],
             Some(RawBody::Json(serde_json::json!({"name": "pg"}))),
-            &[],
+            Some("org_1"),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let request = drain(&captured).join("");
         assert!(
             request.starts_with("POST /v1/postgres HTTP/1.1"),
             "{request}"
@@ -1112,21 +1123,15 @@ mod tests {
     /// query string where the server can resolve it.
     #[tokio::test]
     async fn live_raw_input_body_keeps_the_organization_on_the_query() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
-
-        let api = client(&base).with_org(Some("org_1".to_string()));
-        api.raw(
-            reqwest::Method::POST,
+        let request = raw_request_text(
+            Method::POST,
             "/v1/postgres",
             &[("limit".to_string(), "5".to_string())],
             Some(RawBody::Raw(br#"{"name":"pg"}"#.to_vec())),
-            &[],
+            Some("org_1"),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let request = drain(&captured).join("");
         assert!(
             request.starts_with("POST /v1/postgres?limit=5&organization_id=org_1 HTTP/1.1"),
             "{request}"
@@ -1138,21 +1143,15 @@ mod tests {
     /// organization stays on the query string.
     #[tokio::test]
     async fn live_raw_non_object_json_body_keeps_the_organization_on_the_query() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
-
-        let api = client(&base).with_org(Some("org_1".to_string()));
-        api.raw(
-            reqwest::Method::POST,
+        let request = raw_request_text(
+            Method::POST,
             "/v1/postgres",
             &[],
             Some(RawBody::Json(serde_json::json!([1, 2]))),
-            &[],
+            Some("org_1"),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let request = drain(&captured).join("");
         assert!(
             request.starts_with("POST /v1/postgres?organization_id=org_1 HTTP/1.1"),
             "{request}"
@@ -1163,21 +1162,15 @@ mod tests {
     /// A GET is unchanged: the field already suppresses injection on the query.
     #[tokio::test]
     async fn live_raw_get_field_organization_id_stays_on_the_query() {
-        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
-        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
-
-        let api = client(&base).with_org(Some("org_profile".to_string()));
-        api.raw(
-            reqwest::Method::GET,
+        let request = raw_request_text(
+            Method::GET,
             "/v1/postgres",
             &[("organization_id".to_string(), "org_other".to_string())],
             None,
-            &[],
+            Some("org_profile"),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let request = drain(&captured).join("");
         assert!(
             request.starts_with("GET /v1/postgres?organization_id=org_other HTTP/1.1"),
             "{request}"
