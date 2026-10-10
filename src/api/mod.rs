@@ -159,10 +159,13 @@ impl ApiClient {
 
     /// One raw `api` call: any verb, owned query pairs, an optional [`RawBody`]
     /// and extra headers. A `?` query already on `path` is preserved and the
-    /// owned pairs are merged into it; a JSON object body gains the injected
-    /// organization id like every other write, while raw bytes pass through
-    /// untouched. The full status, headers and body text come back unclassified
-    /// so the caller can print them (`-i`) or run [`classify_raw`].
+    /// owned pairs are merged into it. A JSON object body carries the injected
+    /// organization in the body only — the query gets no copy, because the
+    /// platform's parameter merge would let that copy win. A body that cannot
+    /// carry it (raw bytes, a non-object JSON body) and a body-less GET keep
+    /// the query-string injection. The full status, headers and body text come
+    /// back unclassified so the caller can print them (`-i`) or run
+    /// [`classify_raw`].
     pub async fn raw(
         &self,
         method: Method,
@@ -175,8 +178,23 @@ impl ApiClient {
             Some((path, query)) => (path, Some(query)),
             None => (path, None),
         };
+        // "The caller named the organization" in any of the three places a raw
+        // call can: an owned query pair, the endpoint query, or a JSON object
+        // body field. Naming it anywhere suppresses injection everywhere.
+        let named = query.iter().any(|(key, _)| key == "organization_id")
+            || embedded.is_some_and(|query| {
+                query
+                    .split('&')
+                    .filter_map(|pair| pair.split_once('='))
+                    .any(|(key, _)| key == "organization_id")
+            })
+            || matches!(
+                &body,
+                Some(RawBody::Json(Value::Object(map))) if map.contains_key("organization_id")
+            );
+        let object_body = matches!(&body, Some(RawBody::Json(Value::Object(_))));
         let scoped_body = body.map(|body| match body {
-            RawBody::Json(value) => RawBody::Json(self.scoped_body(value)),
+            RawBody::Json(value) if !named => RawBody::Json(self.scoped_body(value)),
             raw => raw,
         });
         let encoded = scoped_body.as_ref().map(|body| match body {
@@ -189,18 +207,13 @@ impl ApiClient {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_str()))
                 .collect();
-            // An organization id already on the endpoint counts as explicit, like a
-            // field pair would: the profile's organization never overrides it.
-            let mut scoped_query = self.scoped_query(&refs);
-            if let Some(org) = self.org.as_deref()
-                && let Some(embedded) = embedded
-                && embedded
-                    .split('&')
-                    .filter_map(|pair| pair.split_once('='))
-                    .any(|(key, _)| key == "organization_id")
-            {
-                scoped_query.retain(|(key, value)| !(*key == "organization_id" && *value == org));
-            }
+            // A JSON object body carries the organization itself, so the query
+            // never gets a copy; every other request keeps the query injection.
+            let scoped_query = if named || object_body {
+                refs.clone()
+            } else {
+                self.scoped_query(&refs)
+            };
             let mut url = self.build_url(path, &scoped_query)?;
             if let Some(embedded) = embedded
                 && !embedded.is_empty()
@@ -993,6 +1006,184 @@ mod tests {
         let request = drain(&captured).join("");
         assert_eq!(request.matches("organization_id=").count(), 1, "{request}");
         assert!(request.contains("organization_id=org_x"), "{request}");
+    }
+
+    /// A write whose body is a JSON object carries the caller's
+    /// `organization_id` there and nowhere else: the profile's organization is
+    /// not appended to the query string, so the field's value is the one the
+    /// server resolves. This is the reported false-404 shape (`-f`).
+    #[tokio::test]
+    async fn live_raw_write_field_organization_id_is_the_only_organization() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_profile".to_string()));
+        api.raw(
+            reqwest::Method::DELETE,
+            "/api/v1/platform/projects/prj_1",
+            &[],
+            Some(RawBody::Json(
+                serde_json::json!({"organization_id": "org_other"}),
+            )),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        let request_line = request.lines().next().unwrap_or_default();
+        assert_eq!(
+            request_line, "DELETE /api/v1/platform/projects/prj_1 HTTP/1.1",
+            "{request}"
+        );
+        assert_eq!(request.matches("organization_id").count(), 1, "{request}");
+        assert!(
+            request.contains(r#""organization_id":"org_other""#),
+            "{request}"
+        );
+        assert!(!request.contains("org_profile"), "{request}");
+    }
+
+    /// The typed `-F` value is likewise the only organization a write carries.
+    /// A pid parses to a string, so the wire shape matches `-f`; the flag's
+    /// typing path is pinned by the `plan` test in `cli::api`.
+    #[tokio::test]
+    async fn live_raw_typed_field_organization_id_is_the_only_organization() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_profile".to_string()));
+        api.raw(
+            reqwest::Method::PATCH,
+            "/api/v1/platform/projects/prj_1",
+            &[],
+            Some(RawBody::Json(
+                serde_json::json!({"organization_id": "org_other"}),
+            )),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert!(
+            request.starts_with("PATCH /api/v1/platform/projects/prj_1 HTTP/1.1"),
+            "{request}"
+        );
+        assert_eq!(request.matches("organization_id").count(), 1, "{request}");
+        assert!(
+            request.contains(r#""organization_id":"org_other""#),
+            "{request}"
+        );
+        assert!(!request.contains("org_profile"), "{request}");
+    }
+
+    /// A write that names no organization still carries the profile's, in the
+    /// body only.
+    #[tokio::test]
+    async fn live_raw_write_without_field_organization_injects_into_the_body_only() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_1".to_string()));
+        api.raw(
+            reqwest::Method::POST,
+            "/v1/postgres",
+            &[],
+            Some(RawBody::Json(serde_json::json!({"name": "pg"}))),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert!(
+            request.starts_with("POST /v1/postgres HTTP/1.1"),
+            "{request}"
+        );
+        assert_eq!(request.matches("organization_id").count(), 1, "{request}");
+        assert!(
+            request.contains(r#""organization_id":"org_1""#),
+            "{request}"
+        );
+    }
+
+    /// Raw `--input` bytes cannot carry the organization, so it stays on the
+    /// query string where the server can resolve it.
+    #[tokio::test]
+    async fn live_raw_input_body_keeps_the_organization_on_the_query() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_1".to_string()));
+        api.raw(
+            reqwest::Method::POST,
+            "/v1/postgres",
+            &[("limit".to_string(), "5".to_string())],
+            Some(RawBody::Raw(br#"{"name":"pg"}"#.to_vec())),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert!(
+            request.starts_with("POST /v1/postgres?limit=5&organization_id=org_1 HTTP/1.1"),
+            "{request}"
+        );
+        assert!(request.contains(r#"{"name":"pg"}"#), "{request}");
+    }
+
+    /// A JSON body that is not an object cannot carry a key, so the
+    /// organization stays on the query string.
+    #[tokio::test]
+    async fn live_raw_non_object_json_body_keeps_the_organization_on_the_query() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_1".to_string()));
+        api.raw(
+            reqwest::Method::POST,
+            "/v1/postgres",
+            &[],
+            Some(RawBody::Json(serde_json::json!([1, 2]))),
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert!(
+            request.starts_with("POST /v1/postgres?organization_id=org_1 HTTP/1.1"),
+            "{request}"
+        );
+        assert!(request.contains("[1,2]"), "{request}");
+    }
+
+    /// A GET is unchanged: the field already suppresses injection on the query.
+    #[tokio::test]
+    async fn live_raw_get_field_organization_id_stays_on_the_query() {
+        let body = r#"{"status":"success","data":{},"message":null,"status_code":200}"#;
+        let (base, captured) = serve(vec![http_response("200 OK", "", body)]).await;
+
+        let api = client(&base).with_org(Some("org_profile".to_string()));
+        api.raw(
+            reqwest::Method::GET,
+            "/v1/postgres",
+            &[("organization_id".to_string(), "org_other".to_string())],
+            None,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let request = drain(&captured).join("");
+        assert!(
+            request.starts_with("GET /v1/postgres?organization_id=org_other HTTP/1.1"),
+            "{request}"
+        );
+        assert_eq!(request.matches("organization_id=").count(), 1, "{request}");
+        assert!(!request.contains("org_profile"), "{request}");
     }
 
     /// Issue #9: `selfhost api -o json` must keep the documented
