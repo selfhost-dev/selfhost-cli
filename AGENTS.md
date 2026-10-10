@@ -60,3 +60,13 @@ Two traps worth knowing:
 ## Help text
 
 - Client-facing voice: plain customer language, no backticked command names, no internal jargon (no `poll cadence`, `HTTP request`, `429`, process names). The test suite enforces this; keep it green.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on this repo. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
