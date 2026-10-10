@@ -656,6 +656,29 @@ mod tests {
         }
     }
 
+    /// An explicit `organization_id` reaches the write body through both field
+    /// flags, so the request path can keep it there and send no query copy.
+    #[tokio::test]
+    async fn an_explicit_organization_field_plans_into_the_write_body() {
+        let raw = parse_raw_fields(&["organization_id=org_other".to_string()]).unwrap();
+        let typed = parse_fields(&["organization_id=org_other".to_string()])
+            .await
+            .unwrap();
+        for fields in [raw, typed] {
+            let (query, body) = plan(&Method::DELETE, fields, None);
+            assert!(query.is_empty(), "no query copy on a write");
+            match body {
+                PlannedBody::Json(Value::Object(map)) => {
+                    assert_eq!(
+                        map["organization_id"],
+                        Value::String("org_other".to_string())
+                    );
+                }
+                other => panic!("expected a JSON object, got {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn input_bytes_win_the_body_and_push_fields_to_the_query() {
         let fields = vec![("a".to_string(), Value::String("1".to_string()))];
