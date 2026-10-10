@@ -48,7 +48,7 @@ Delete the binary and, on Windows, drop the install directory from your user PAT
 
 ### Building from source
 
-You need Rust 1.88 or newer.
+You need Rust 1.99.0 or newer.
 
 ```sh
 cargo build

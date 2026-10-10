@@ -20,11 +20,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # Pinned explicitly instead of `stable` so a tag built months from now uses the
-  # same compiler that was tested. 1.98.1 is current stable (it is also the Rust
-  # that ships on GitHub's runner images) and sits well above the
-  # `rust-version = "1.88"` MSRV floor declared in Cargo.toml. Quoted so YAML
-  # cannot read it as a number.
-  RUST_TOOLCHAIN_VERSION: "1.98.1"
+  # same compiler that was tested. 1.99.0 is current stable, and it is the
+  # `rust-version = "1.99.0"` MSRV floor declared in Cargo.toml, so the release
+  # builds with the oldest compiler the crate supports. Quoted so YAML cannot
+  # read it as a number.
+  RUST_TOOLCHAIN_VERSION: "1.99.0"
 
 jobs:
   validate-release-source:

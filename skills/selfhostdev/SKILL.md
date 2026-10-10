@@ -27,7 +27,7 @@ platform endpoint the typed commands do not cover yet.
 ## Setup
 
 Build the binary from the project's repository
-(github.com/selfhost-dev/selfhost-cli, Rust 1.88+), put it on `PATH`, then sign
+(github.com/selfhost-dev/selfhost-cli, Rust 1.99.0+), put it on `PATH`, then sign
 in once per profile. The CLI stores the credentials and renews them over HTTPS
 without a browser, so a machine signed in once keeps working unattended.
 
