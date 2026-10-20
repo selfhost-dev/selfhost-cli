@@ -19,12 +19,14 @@ Working rules for coding agents in this repo. Humans may override any rule with 
 
 A `v*` tag is the only thing that publishes. No one uploads an artifact by hand, and the tag must point at a commit on `main`.
 
+Releases follow semantic versioning, and the tag is the version with a `v` prefix: `vX.Y.Z`, for example `v0.3.3`. A dash suffix is a pre-release, `vX.Y.Z-rc.1`, and it deliberately leaves the manifest pointing at the stable release. Enable the repository hook once per clone with `git config core.hooksPath .githooks`; it refuses to push a tag that is not shaped that way. The release workflow then refuses a tag that disagrees with the `Cargo.toml` version.
+
 1. Land the change through a pull request into `main`.
 2. Open a separate pull request that bumps `Cargo.toml` and `Cargo.lock` and nothing else, titled `chore(release): selfhost reports version X.Y.Z`.
 3. Create a signed annotated tag `vX.Y.Z` on that merge commit and push it. Tag creation is admin-only by ruleset, and a tag that disagrees with the `Cargo.toml` version fails the run.
 4. Verify the run: every job green, thirteen assets on the GitHub release, `https://cli.selfhost.dev/latest.json` reporting the new version, and all six platform digests matching the release artifacts.
 
-CI builds six native targets, publishes the GitHub release, uploads the distribution, and regenerates the manifest. A version containing a dash publishes binaries but deliberately leaves the manifest pointing at the stable release.
+CI builds six native targets, publishes the GitHub release, uploads the distribution, and regenerates the manifest.
 
 ## Public surfaces and identifiers
 

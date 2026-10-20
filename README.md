@@ -33,7 +33,7 @@ selfhost update --check     # just say whether there is one
 
 `update` downloads the build for your platform, checks it against the SHA-256 the release list publishes, and replaces the running binary. It never asks for administrator rights. If it cannot write where the binary sits, it prints the installer command that can and stops. Set `SELFHOST_MANIFEST_URL` to read a different release list. The installer honours the same name.
 
-The installer stays the way to install into a directory the CLI cannot write, and to move the binary somewhere else in the first place. It has no version pin, so it never fetches a pre-release, and `update` follows the same rule and leaves a pre-release build alone. Each pre-release tag publishes its own binaries on the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases). Download the file for your platform and put it on your PATH.
+The installer stays the way to install into a directory the CLI cannot write, and to move the binary somewhere else in the first place. Releases follow semantic versioning, and every release is tagged `vX.Y.Z`. The installer has no version pin, so it never fetches a pre-release, and `update` follows the same rule and leaves a pre-release build alone. Each pre-release tag publishes its own binaries on the [releases page](https://github.com/selfhost-dev/selfhost-cli/releases). Download the file for your platform and put it on your PATH.
 
 ### Checking what you installed
 
