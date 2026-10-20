@@ -471,7 +471,9 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
-          name: selfhost ${{ needs.validate-release-source.outputs.version }}
+          # The page title is the tag itself, so the release list shows the same
+          # `vX.Y.Z` name that the tag carries. One name per release.
+          name: ${{ github.ref_name }}
           # A curated body, deliberately not `generate_release_notes`. That
           # setting renders merged-PR titles and commit messages verbatim onto
           # the page that will carry our install instructions, so a hostile PR
