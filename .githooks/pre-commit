@@ -1,0 +1,78 @@
+#!/bin/sh
+# Blocks staged files larger than 5,000 tokens, counted as bytes / 4, so an
+# agent can read each file in one pass. Only staged files are checked, and
+# files no agent authors by hand (lockfiles, generated code, binaries) are
+# skipped.
+#
+# Enable once per clone:
+#
+#     git config core.hooksPath .githooks
+set -eu
+
+max_tokens=5000
+max_bytes=$((max_tokens * 4))
+status=0
+
+# Added, copied, modified, renamed files only; deletions have nothing to check.
+files=$(git diff --cached --name-only --diff-filter=ACMR -z | tr '\0' '\n')
+[ -n "$files" ] || exit 0
+
+is_skipped() {
+    case "$1" in
+        Cargo.lock | */Cargo.lock | package-lock.json | */package-lock.json | \
+        yarn.lock | */yarn.lock | pnpm-lock.yaml | */pnpm-lock.yaml | \
+        bun.lock | */bun.lock | bun.lockb | */bun.lockb | *.lock | \
+        *.min.js | *.min.css | *.map | *.snap | *.pb.go | *_pb2.py | \
+        *.generated.* | *.gen.* | *.svg | \
+        *.png | *.jpg | *.jpeg | *.gif | *.ico | *.pdf | *.woff | *.woff2)
+            return 0 ;;
+    esac
+    # Codegen marker in the first 1 KiB of the staged content.
+    if git show ":$1" | head -c 1024 | grep -Eq '@generated|DO NOT EDIT|Code generated'; then
+        return 0
+    fi
+    # Binary content is not agent-authored text.
+    if git diff --cached --numstat -- "$1" | grep -q '^-[[:space:]]-'; then
+        return 0
+    fi
+    return 1
+}
+
+oldifs=$IFS
+IFS='
+'
+for file in $files; do
+    IFS=$oldifs
+    bytes=$(git cat-file -s ":$file")
+    [ "$bytes" -gt "$max_bytes" ] || continue
+    is_skipped "$file" && continue
+
+    tokens=$((bytes / 4))
+    status=1
+    cat >&2 <<MSG
+error: $file is about $tokens tokens ($bytes bytes); the limit is $max_tokens tokens ($max_bytes bytes).
+
+How to split it:
+  1. Read the file and list its top-level units: modules, types, impl blocks,
+     test groups, or markdown sections.
+  2. Group units that change together. Aim for files under about 3,000 tokens
+     so the file has room to grow.
+  3. Move each group to a new file next to the original, named for what it
+     holds. Never name a file part2, misc, or utils.
+       Rust:      turn foo.rs into foo/mod.rs plus foo/<topic>.rs, declare
+                  'mod <topic>;' in foo/mod.rs, and re-export public items
+                  with 'pub use' so callers keep their import paths.
+                  Move '#[cfg(test)]' tests to foo/tests.rs.
+       Markdown:  one file per top-level heading; keep an index file that
+                  links to each part.
+       Other:     one file per cohesive unit, imported from the original.
+  4. Move code as is. Do not rewrite it in the same commit.
+  5. Stage every new file, then run the build and tests, then commit again:
+       git add <new files> $file
+MSG
+    IFS='
+'
+done
+IFS=$oldifs
+
+exit "$status"

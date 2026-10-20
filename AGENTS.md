@@ -14,6 +14,7 @@ Working rules for coding agents in this repo. Humans may override any rule with 
   - Bad: `fix(cli): prune reload-users, update tests, sync doc` (restates the diff)
 - One logical change per commit. Do not force-push or rewrite commits that are not yours.
 - Banned in commit messages: the word `verbatim`, and process/internal labels (`round 1`, `verifier round`, `slice N`, `WIP`). Describe the change, not the workflow that produced it.
+- The pre-commit hook in `.githooks` refuses a staged file over 5,000 tokens (bytes / 4). It skips lockfiles, generated code, and binaries, and its error message explains how to split the file. Enable it with `git config core.hooksPath .githooks`.
 
 ## Releases
 
