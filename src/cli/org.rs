@@ -16,11 +16,16 @@
 //! accept. The destructive verbs (`delete`, `members remove`, `invites revoke`)
 //! confirm first — `--yes` answers the prompt, and without it they need a
 //! terminal (design §6).
+//!
+//! Roles are the platform's: `org roles list` reads the roles this organization
+//! can grant, and every `--role` is one of those slugs, resolved to the pid an
+//! assignment takes when the command runs. The CLI holds no role catalogue, so a
+//! system role or a custom role the platform added works without a release.
 
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use clap::{Args, ValueEnum};
+use clap::Args;
 use serde_json::{Map, Value};
 
 use crate::api::ApiClient;
@@ -70,94 +75,17 @@ pub struct OrgDeleteArgs {
     pub target: Option<String>,
 }
 
-/// A role a person can hold in an organization. The five are the platform's
-/// seeded system roles; the API takes the pid, so every `--role` resolves
-/// through [`Role::pid`]. The wording matches [`ROLE_CATALOGUE`], which is what
-/// `org roles list` prints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Role {
-    /// Everything, including billing and deleting the organization
-    Owner,
-    /// Everything except billing writes and changing who owns the organization
-    Admin,
-    /// Billing details, payment methods and invoices
-    Billing,
-    /// Invites people and manages projects
-    Manager,
-    /// Reads and works with what the organization runs
-    Member,
-}
-
-impl Role {
-    /// The pid the API takes (`role_admin`), and the shape the responses echo.
-    pub fn pid(self) -> &'static str {
-        match self {
-            Self::Owner => "role_owner",
-            Self::Admin => "role_admin",
-            Self::Billing => "role_billing",
-            Self::Manager => "role_manager",
-            Self::Member => "role_member",
-        }
-    }
-
-    /// The slug the API reports and the CLI prints.
-    pub fn slug(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Admin => "admin",
-            Self::Billing => "billing",
-            Self::Manager => "manager",
-            Self::Member => "member",
-        }
-    }
-}
-
-/// The five roles the platform seeds, in priority order: the slug, the wire pid,
-/// the priority and a short meaning in customer voice. `org roles list` prints
-/// this table because no endpoint returns the catalogue — a role added on the
-/// server needs a CLI release to appear here.
-const ROLE_CATALOGUE: [(&str, &str, u32, &str); 5] = [
-    (
-        "owner",
-        "role_owner",
-        100,
-        "Everything, including billing and deleting the organization",
-    ),
-    (
-        "admin",
-        "role_admin",
-        80,
-        "Everything except billing writes and changing who owns the organization",
-    ),
-    (
-        "billing",
-        "role_billing",
-        60,
-        "Billing details, payment methods and invoices",
-    ),
-    (
-        "manager",
-        "role_manager",
-        40,
-        "Invites people and manages projects",
-    ),
-    (
-        "member",
-        "role_member",
-        20,
-        "Reads and works with what the organization runs",
-    ),
-];
-
 // `org members add <email> [--role ROLE]` / `org invites create <email> …`.
+// A role is the slug the platform lists for this organization, resolved to the
+// pid an assignment takes when the command runs — the CLI holds no catalogue.
 #[derive(Debug, Clone, Args)]
 pub struct InviteArgs {
     /// Email address of the person to invite
     pub email: String,
 
-    /// Role to grant once they accept (default: member)
+    /// Role slug to grant once they accept (default: member)
     #[arg(long, default_value = "member")]
-    pub role: Role,
+    pub role: String,
 }
 
 // `org members remove <email>` / `org invites revoke <email>`.
@@ -173,9 +101,9 @@ pub struct UpdateRoleArgs {
     /// Email address of the person
     pub email: String,
 
-    /// Role to give them
+    /// Role slug to give them
     #[arg(long)]
-    pub role: Role,
+    pub role: String,
 }
 
 // `org show [ORG]` / `org members list [ORG]` — the optional organization.
@@ -248,20 +176,19 @@ impl OrgMembersCommand {
 /// Roles you can grant
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum OrgRolesCommand {
-    /// List the roles an organization can grant
+    /// List the roles this organization can grant
     ///
-    /// The list ships with this CLI: the platform seeds these five roles and has
-    /// no endpoint that returns the catalogue, so a role added on the server
-    /// needs a newer CLI before it can be granted from here.
+    /// The list is the platform's, so a role added there appears without a new
+    /// CLI, and any of these slugs works wherever a command takes a role.
     #[command(name = "list")]
-    List(NoArgs),
+    List(OrgTargetArgs),
 }
 
 impl OrgRolesCommand {
     /// Run one `org roles` subcommand against the global options.
     pub fn dispatch(&self, global: &GlobalArgs) -> Result<()> {
         match self {
-            Self::List(_) => roles(global),
+            Self::List(args) => block_on(roles(global, args)),
         }
     }
 }
@@ -468,11 +395,16 @@ async fn invitations(global: &GlobalArgs, args: &OrgTargetArgs) -> Result<()> {
     print(global, &Value::Array(rows))
 }
 
-/// `org roles list`: the roles that ship with the CLI. The platform seeds these
-/// five and nothing returns the catalogue, so this needs no credentials and
-/// makes no request.
-fn roles(global: &GlobalArgs) -> Result<()> {
-    print(global, &Value::Array(role_rows()))
+/// `org roles list [ORG]`: the roles this organization can grant, read from the
+/// platform so a role it added after this CLI shipped still appears.
+async fn roles(global: &GlobalArgs, args: &OrgTargetArgs) -> Result<()> {
+    let mut store = ProfileStore::load()?;
+    let name = store.resolved_name(global.profile.as_deref())?;
+    let (client, pid, _reference) =
+        org_client(&mut store, &name, global, args.target.as_deref()).await?;
+
+    let rows = role_listing(&client, &pid).await?;
+    print(global, &Value::Array(rows))
 }
 
 /// `org activity list [ORG]`: recent entries from one organization's log.
@@ -631,20 +563,25 @@ async fn invite(global: &GlobalArgs, args: &InviteArgs) -> Result<()> {
     let name = store.resolved_name(global.profile.as_deref())?;
     let (client, pid, reference) = org_client(&mut store, &name, global, None).await?;
 
-    let invitation = create_invitation(&client, &pid, &args.email, args.role).await?;
+    let role_pid = role_pid_for(&role_records(&client, &pid).await?, &args.role, &reference)?;
+    let invitation = create_invitation(&client, &pid, &args.email, &role_pid).await?;
+    let assigned = invitation
+        .get("role_assigned")
+        .and_then(Value::as_str)
+        .unwrap_or(&args.role);
 
     if human_output(global) {
         println!(
             "invited {} to {} as {}; they join when they accept the invitation",
             strip_control_characters(&args.email),
             strip_control_characters(&reference),
-            args.role.slug(),
+            strip_control_characters(assigned),
         );
     } else {
         let mut value = Map::new();
         value.insert(
             "invitation".to_string(),
-            invitation_object(&invitation, &args.email, args.role, &pid),
+            invitation_object(&invitation, &args.email, &args.role, &pid),
         );
         print(global, &Value::Object(value))?;
     }
@@ -693,21 +630,22 @@ async fn remove_member(global: &GlobalArgs, args: &MemberTargetArgs) -> Result<(
     Ok(())
 }
 
-/// `org members update-role <email> --role ROLE`: resolve the email to a user
-/// pid, then hand the platform the new role's pid.
+/// `org members update-role <email> --role ROLE`: resolve the role slug and the
+/// email to the pids the platform takes, then hand it the new role's pid.
 async fn update_member_role(global: &GlobalArgs, args: &UpdateRoleArgs) -> Result<()> {
     let mut store = ProfileStore::load()?;
     let name = store.resolved_name(global.profile.as_deref())?;
     let (client, pid, reference) = org_client(&mut store, &name, global, None).await?;
 
+    let role_pid = role_pid_for(&role_records(&client, &pid).await?, &args.role, &reference)?;
     let members = member_records(&client, &pid).await?;
     let user_pid = member_pid_for(&members, &args.email, &reference)?;
 
-    let updated = set_member_role(&client, &pid, &user_pid, args.role).await?;
+    let updated = set_member_role(&client, &pid, &user_pid, &role_pid).await?;
     let role = updated
         .pointer("/role/slug")
         .and_then(Value::as_str)
-        .unwrap_or(args.role.slug());
+        .unwrap_or(&args.role);
 
     if human_output(global) {
         println!(
@@ -778,14 +716,11 @@ async fn create_invitation(
     client: &ApiClient,
     pid: &str,
     email: &str,
-    role: Role,
+    role_pid: &str,
 ) -> Result<Value> {
     let mut body = Map::new();
     body.insert("email".to_string(), Value::String(email.to_string()));
-    body.insert(
-        "role_pid".to_string(),
-        Value::String(role.pid().to_string()),
-    );
+    body.insert("role_pid".to_string(), Value::String(role_pid.to_string()));
     client
         .post(
             &format!("/organizations/{pid}/invitations"),
@@ -880,13 +815,10 @@ async fn set_member_role(
     client: &ApiClient,
     pid: &str,
     user_pid: &str,
-    role: Role,
+    role_pid: &str,
 ) -> Result<Value> {
     let mut body = Map::new();
-    body.insert(
-        "role_pid".to_string(),
-        Value::String(role.pid().to_string()),
-    );
+    body.insert("role_pid".to_string(), Value::String(role_pid.to_string()));
     client
         .patch(
             &format!("/organizations/{pid}/members/{user_pid}/role"),
@@ -939,6 +871,24 @@ async fn invitation_records(client: &ApiClient, pid: &str) -> Result<Value> {
 /// API returns every status, so the wording is never "pending".
 async fn invitation_listing(client: &ApiClient, pid: &str) -> Result<Vec<Value>> {
     Ok(invitation_rows(&invitation_records(client, pid).await?))
+}
+
+/// `GET /organizations/:pid/roles` — the roles this organization can grant, as
+/// the platform defines them today, under the payload's `roles` key. A payload
+/// without that key reads as no roles rather than an error.
+async fn role_records(client: &ApiClient, pid: &str) -> Result<Value> {
+    let payload = client
+        .get(&format!("/organizations/{pid}/roles"), &[])
+        .await?;
+    Ok(payload
+        .get("roles")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new())))
+}
+
+/// `GET /organizations/:pid/roles`, curated for `org roles list`.
+async fn role_listing(client: &ApiClient, pid: &str) -> Result<Vec<Value>> {
+    Ok(role_rows(&role_records(client, pid).await?))
 }
 
 /// `GET /organizations/:pid/activity_logs` for one page.
@@ -1143,21 +1093,64 @@ fn member_row(member: &Value) -> Value {
     Value::Object(row)
 }
 
-/// `org roles list` rows: the slug, the wire pid, the priority and the meaning.
-/// The table ships with the CLI, so a role added on the server needs a CLI
-/// release before it can appear here.
-fn role_rows() -> Vec<Value> {
-    ROLE_CATALOGUE
-        .iter()
-        .map(|(slug, pid, priority, summary)| {
-            let mut row = Map::new();
-            row.insert("role".to_string(), Value::String((*slug).to_string()));
-            row.insert("pid".to_string(), Value::String((*pid).to_string()));
-            row.insert("priority".to_string(), Value::from(*priority));
-            row.insert("summary".to_string(), Value::String((*summary).to_string()));
-            Value::Object(row)
-        })
-        .collect()
+/// `org roles list` rows: the slug a person types, the wire pid an assignment
+/// takes, the rank and the platform's own description. The platform orders them,
+/// so the table keeps its order.
+fn role_rows(roles: &Value) -> Vec<Value> {
+    roles
+        .as_array()
+        .map(|roles| roles.iter().map(role_row).collect())
+        .unwrap_or_default()
+}
+
+/// One role. A field the platform leaves out is omitted, never null; a role
+/// without a description still reads as its name.
+fn role_row(role: &Value) -> Value {
+    let mut row = Map::new();
+    for (column, field) in [("role", "slug"), ("pid", "pid")] {
+        if let Some(value) = role
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            row.insert(column.to_string(), Value::String(value.to_string()));
+        }
+    }
+    if let Some(priority) = role.get("priority").filter(|value| value.is_number()) {
+        row.insert("priority".to_string(), priority.clone());
+    }
+    for field in ["description", "name"] {
+        if let Some(value) = role
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            row.insert("summary".to_string(), Value::String(value.to_string()));
+            break;
+        }
+    }
+    Value::Object(row)
+}
+
+/// The pid of the role `slug` names in this organization's own list. Anything
+/// else is a usage error naming the listing that shows the real ones — the CLI
+/// holds no catalogue, so a slug it has never shipped still works.
+fn role_pid_for(roles: &Value, slug: &str, organization: &str) -> Result<String> {
+    let pid = roles.as_array().and_then(|roles| {
+        roles
+            .iter()
+            .find(|role| role.get("slug").and_then(Value::as_str) == Some(slug))
+            .and_then(|role| role.get("pid").and_then(Value::as_str))
+            .filter(|pid| !pid.is_empty())
+    });
+
+    pid.map(str::to_owned).ok_or_else(|| {
+        Error::Usage(format!(
+            "{} is not a role in {}; run selfhost org roles list to see the roles it can grant",
+            strip_control_characters(slug),
+            strip_control_characters(organization),
+        ))
+    })
 }
 
 /// `org invites list` rows.
@@ -1192,9 +1185,9 @@ fn invitation_row(invitation: &Value) -> Value {
 }
 
 /// The invitation object `members add` / `invites create` print: the curated
-/// fields, with the role the platform assigned falling back to the one asked
+/// fields, with the role the platform assigned falling back to the slug asked
 /// for.
-fn invitation_object(invitation: &Value, email: &str, role: Role, organization_pid: &str) -> Value {
+fn invitation_object(invitation: &Value, email: &str, role: &str, organization_pid: &str) -> Value {
     let mut object = Map::new();
     object.insert(
         "email".to_string(),
@@ -1213,7 +1206,7 @@ fn invitation_object(invitation: &Value, email: &str, role: Role, organization_p
             invitation
                 .get("role_assigned")
                 .and_then(Value::as_str)
-                .unwrap_or(role.slug())
+                .unwrap_or(role)
                 .to_string(),
         ),
     );
@@ -1751,6 +1744,25 @@ mod tests {
         );
     }
 
+    /// A member may hold a role this CLI has never shipped, and a membership may
+    /// carry no role at all: both list, and the role prints as the platform
+    /// spelled it.
+    #[test]
+    fn members_holding_a_role_the_cli_never_shipped_still_list() {
+        let members = json!([
+            {"email": "dana@example.com", "first_name": "Dana", "role": "data_viewer"},
+            {"email": "eli@example.com", "first_name": "Eli", "role": "support_engineer"},
+            {"email": "fay@example.com", "first_name": "Fay", "role": null},
+        ]);
+
+        let rows = member_rows(&members);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["role"], "data_viewer");
+        assert_eq!(rows[1]["role"], "support_engineer");
+        assert_eq!(rows[2]["email"], "fay@example.com");
+        assert!(rows[2].get("role").is_none(), "{:?}", rows[2]);
+    }
+
     #[tokio::test]
     async fn activity_is_paged_through_the_organization_endpoint() {
         let (base, captured) = serve(vec![envelope(json!([
@@ -1984,70 +1996,121 @@ mod tests {
         );
     }
 
-    /// The `--role` values and the static table are the same five roles: a slug
-    /// or pid that drifts between them would send the API a role it does not
-    /// have (or print one it does not offer).
+    /// The role list is the platform's, in the order it lists them: a role the
+    /// CLI has never shipped (Data Viewer, a custom role) prints like any other,
+    /// and a field the payload leaves out never becomes null.
     #[test]
-    fn every_role_maps_to_a_catalogue_pid_and_slug() {
-        let mut values: Vec<&str> = Role::value_variants()
-            .iter()
-            .map(|role| role.slug())
-            .collect();
-        values.sort_unstable();
-        let mut catalogue: Vec<&str> = ROLE_CATALOGUE.iter().map(|(slug, _, _, _)| *slug).collect();
-        catalogue.sort_unstable();
-        assert_eq!(values, catalogue);
+    fn role_rows_print_the_roles_the_platform_returns() {
+        let roles = json!([
+            {
+                "pid": "role_owner",
+                "slug": "owner",
+                "name": "Owner",
+                "description": "Full control over the organization",
+                "priority": 100,
+                "permissions": ["*"],
+            },
+            {
+                "pid": "role_data_viewer",
+                "slug": "data_viewer",
+                "name": "Data Viewer",
+                "description": "Can read data and run read-only SQL, without changing anything",
+                "priority": 30,
+                "permissions": ["cloud_instances:query"],
+            },
+            {
+                "pid": "role_support",
+                "slug": "support_engineer",
+                "name": "Support Engineer",
+                "priority": 5,
+            },
+        ]);
 
-        for (role, slug, pid) in [
-            (Role::Owner, "owner", "role_owner"),
-            (Role::Admin, "admin", "role_admin"),
-            (Role::Billing, "billing", "role_billing"),
-            (Role::Manager, "manager", "role_manager"),
-            (Role::Member, "member", "role_member"),
-        ] {
-            assert_eq!(role.slug(), slug);
-            assert_eq!(role.pid(), pid);
-            let entry = ROLE_CATALOGUE
-                .iter()
-                .find(|(catalogue_slug, _, _, _)| *catalogue_slug == slug)
-                .unwrap_or_else(|| panic!("{slug} is missing from the catalogue"));
-            assert_eq!(entry.1, pid, "{slug}");
-        }
+        let rows = role_rows(&roles);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["role"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            ["owner", "data_viewer", "support_engineer"]
+        );
+        assert_eq!(rows[1]["pid"], "role_data_viewer");
+        assert_eq!(rows[1]["priority"], 30);
+        assert_eq!(
+            rows[1]["summary"],
+            "Can read data and run read-only SQL, without changing anything"
+        );
+        // No description on the platform's row: the name still says what it is.
+        assert_eq!(rows[2]["summary"], "Support Engineer");
+        assert!(
+            rows.iter().all(|row| row
+                .as_object()
+                .is_some_and(|row| row.values().all(|value| !value.is_null()))),
+            "{rows:?}"
+        );
+
+        // A payload with no role list is three years of nothing, not a crash.
+        assert!(role_rows(&json!({})).is_empty());
     }
 
-    #[test]
-    fn the_role_table_lists_the_five_roles_in_priority_order() {
-        let rows = role_rows();
-        assert_eq!(rows.len(), 5);
+    #[tokio::test]
+    async fn the_role_list_comes_from_the_organizations_roles_endpoint() {
+        let (base, captured) = serve(vec![envelope(json!({
+            "roles": [
+                {
+                    "pid": "role_data_viewer",
+                    "slug": "data_viewer",
+                    "name": "Data Viewer",
+                    "description": "Can read data and run read-only SQL",
+                    "priority": 30,
+                    "permissions": ["cloud_instances:query", "cloud_instances:ask"],
+                },
+            ],
+        }))])
+        .await;
+        let client = ApiClient::with_token(&base, "test-token".to_string(), 5)
+            .with_org(Some("org_a1".to_string()));
 
-        let pids: Vec<&str> = rows.iter().filter_map(|row| row["pid"].as_str()).collect();
+        let rows = role_listing(&client, "org_a1").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["role"], "data_viewer");
+        assert_eq!(rows[0]["pid"], "role_data_viewer");
+        assert_eq!(rows[0]["summary"], "Can read data and run read-only SQL");
         assert_eq!(
-            pids,
-            [
-                "role_owner",
-                "role_admin",
-                "role_billing",
-                "role_manager",
-                "role_member",
-            ]
+            request_line(&captured),
+            "GET /organizations/org_a1/roles?organization_id=org_a1 HTTP/1.1"
         );
-        let priorities: Vec<u64> = rows
-            .iter()
-            .filter_map(|row| row["priority"].as_u64())
-            .collect();
-        assert_eq!(priorities, [100, 80, 60, 40, 20]);
+    }
 
-        for row in &rows {
-            for key in ["role", "pid", "priority", "summary"] {
-                assert!(row.get(key).is_some(), "{key} missing from {row:?}");
-            }
-            assert!(
-                row["summary"]
-                    .as_str()
-                    .is_some_and(|summary| summary.len() > 10),
-                "{row:?}"
-            );
-        }
+    /// `--role` takes any slug the organization's own list carries, so a new or
+    /// custom role needs no CLI release; a slug the platform does not list is a
+    /// usage error that names the command which shows the real ones.
+    #[test]
+    fn the_role_pid_is_resolved_from_the_organizations_own_list() {
+        let roles = json!([
+            {"pid": "role_data_viewer", "slug": "data_viewer"},
+            {"pid": "role_support", "slug": "support_engineer"},
+        ]);
+
+        assert_eq!(
+            role_pid_for(&roles, "data_viewer", "acme").unwrap(),
+            "role_data_viewer"
+        );
+        assert_eq!(
+            role_pid_for(&roles, "support_engineer", "acme").unwrap(),
+            "role_support"
+        );
+
+        let error = role_pid_for(&roles, "superuser", "acme")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("superuser"), "{error}");
+        assert!(error.contains("acme"), "{error}");
+        assert!(error.contains("org roles list"), "{error}");
+
+        // A slug whose row carries no pid cannot be sent anywhere.
+        let incomplete = json!([{"slug": "support_engineer"}]);
+        assert!(role_pid_for(&incomplete, "support_engineer", "acme").is_err());
     }
 
     /// The invitation serializer hands back the raw invitation token. It is
@@ -2079,8 +2142,7 @@ mod tests {
             })
         );
 
-        let object =
-            invitation_object(&invitations[0], "dana@example.com", Role::Manager, "org_a1");
+        let object = invitation_object(&invitations[0], "dana@example.com", "manager", "org_a1");
         assert_eq!(
             object,
             json!({
@@ -2110,7 +2172,7 @@ mod tests {
     /// echoes none, so the field is never missing.
     #[test]
     fn the_invitation_object_falls_back_to_the_requested_role() {
-        let object = invitation_object(&json!({}), "dana@example.com", Role::Billing, "org_a1");
+        let object = invitation_object(&json!({}), "dana@example.com", "billing", "org_a1");
         assert_eq!(object["role"], "billing");
         assert_eq!(object["email"], "dana@example.com");
         assert_eq!(object["organization_pid"], "org_a1");
@@ -2307,7 +2369,7 @@ mod tests {
         let client = ApiClient::with_token(&base, "test-token".to_string(), 5)
             .with_org(Some("org_a1".to_string()));
 
-        let updated = set_member_role(&client, "org_a1", "user_1", Role::Admin)
+        let updated = set_member_role(&client, "org_a1", "user_1", "role_admin")
             .await
             .unwrap();
         remove_organization_member(&client, "org_a1", "user_1")
@@ -2349,7 +2411,7 @@ mod tests {
         let client = ApiClient::with_token(&base, "test-token".to_string(), 5)
             .with_org(Some("org_a1".to_string()));
 
-        let invitation = create_invitation(&client, "org_a1", "dana@example.com", Role::Manager)
+        let invitation = create_invitation(&client, "org_a1", "dana@example.com", "role_manager")
             .await
             .unwrap();
         assert_eq!(invitation["pid"], "inv_1");

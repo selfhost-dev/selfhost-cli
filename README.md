@@ -109,7 +109,7 @@ selfhost org members list            # the people in it
 selfhost org members add dana@example.com --role manager
 selfhost org members update-role dana@example.com --role admin
 selfhost org members remove dana@example.com
-selfhost org roles list              # what each role can do
+selfhost org roles list              # the roles this organization can grant
 selfhost org invites list            # invitations and where they stand
 selfhost org invites create dana@example.com
 selfhost org invites revoke dana@example.com
@@ -122,7 +122,7 @@ selfhost org activity list --page 2  # recent activity, newest first
 
 Invitations arrive by email. There is no separate add-member call. `org members add` and `org invites create` do the same thing, and the person becomes a member when they accept the invitation. `org invites list` shows every invitation and its status, not only the ones still waiting. Managing members and invitations needs owner or admin rights on the organization, and the API refuses anything a role cannot do with a message the CLI prints as-is.
 
-`org roles list` is printed by the CLI itself. The platform ships five system roles, owner, admin, billing, manager and member, and has no endpoint that returns them. A role added on the server needs a newer CLI to appear here.
+`org roles list` reads the roles from the platform, so a role added there appears without a newer CLI. Its `role` column is the slug every `--role` takes: role names are not built into this CLI, so a new system role or a custom one works as soon as the platform lists it. A slug the organization cannot grant is a usage error naming this listing.
 
 Deleting an organization, removing a member and cancelling an invitation are destructive, so they ask first. `org delete` wants the organization's name typed back, and the other two want a yes. `--yes` answers the prompt for scripts. Without it, a run with no terminal stops and tells you to pass `--yes`, rather than waiting on a prompt that can never arrive.
 

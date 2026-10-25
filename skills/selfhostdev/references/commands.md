@@ -129,15 +129,18 @@ Nested groups:
 | `org members add` | `<EMAIL>`, `--role <ROLE>` (default `member`) | Invite by email; they become a member when they accept |
 | `org members remove` | `<EMAIL>` | Remove a member; they lose access immediately |
 | `org members update-role` | `--role <ROLE>` (required), `<EMAIL>` | Change a member's role |
-| `org roles list` | – | List the roles an organization can grant (printed by the CLI, not fetched) |
+| `org roles list` | `[ORG]` | List the roles this organization can grant, read from the platform |
 | `org invites list` | `[ORG]` | List every invitation and its status |
 | `org invites create` | `<EMAIL>`, `--role <ROLE>` (default `member`) | Invite by email; same operation as `org members add` |
 | `org invites revoke` | `<EMAIL>` | Cancel an invitation that is still waiting |
 | `org activity list` | `[ORG]`, `--page <PAGE>` (default `1`), `--limit <LIMIT>` (default `20`, up to 200) | Show recent activity in an organization |
 
-`ROLE` values: `owner`, `admin`, `billing`, `manager`, `member`. `org list` and
-`org use` ignore `--org` (the listing must work when the saved organization is
-gone, and `org use` is how it is replaced).
+`ROLE` is any slug `org roles list` returns for the organization — the platform's
+list, not one built into the CLI, so a new system role or a custom role works
+without a CLI release. A slug the organization does not list is a usage error
+that names `org roles list`. `org list` and `org use` ignore `--org` (the listing
+must work when the saved organization is gone, and `org use` is how it is
+replaced).
 
 ```sh
 selfhost org show acme --format json
