@@ -78,6 +78,7 @@ fn org_commands_without_an_organization_report_the_use_hint() {
         vec!["org", "activity", "list"],
         vec!["org", "invites", "list"],
         vec!["org", "invites", "create", "dana@example.com"],
+        vec!["org", "roles", "list"],
     ] {
         selfhost(&home)
             .args(&command)
@@ -184,73 +185,64 @@ fn yes_satisfies_the_destructive_gate_before_credentials_are_read() {
     }
 }
 
-/// The role table ships with the CLI: it needs no credentials and no network,
-/// and it is the same five roles the `--role` flags accept.
+/// The role list is the platform's now, so it needs a session and an
+/// organization like every other listing instead of printing a table built into
+/// this binary.
 #[test]
-fn roles_list_needs_no_credentials() {
-    let home = TempHome::new();
-
-    let assert = selfhost(&home)
-        .args(["org", "roles", "list"])
-        .assert()
-        .success();
-    let rows: Vec<serde_json::Value> = serde_json::from_slice(&assert.get_output().stdout)
-        .expect("roles list prints JSON when it is piped");
-    assert_eq!(rows.len(), 5);
-    assert_eq!(
-        rows.iter()
-            .map(|row| row["role"].as_str().unwrap_or_default())
-            .collect::<Vec<_>>(),
-        ["owner", "admin", "billing", "manager", "member"]
-    );
-    assert_eq!(
-        rows.iter()
-            .map(|row| row["pid"].as_str().unwrap_or_default())
-            .collect::<Vec<_>>(),
-        [
-            "role_owner",
-            "role_admin",
-            "role_billing",
-            "role_manager",
-            "role_member",
-        ]
-    );
-
-    // The table format is the same five, for a person.
-    let assert = selfhost(&home)
-        .args(["org", "roles", "list", "--format", "table"])
-        .assert()
-        .success();
-    let table = String::from_utf8_lossy(&assert.get_output().stdout);
-    for pid in [
-        "role_owner",
-        "role_admin",
-        "role_billing",
-        "role_manager",
-        "role_member",
-    ] {
-        assert!(table.contains(pid), "{table}");
-    }
-}
-
-/// `--role` accepts exactly the five shipped roles. `viewer` never existed on
-/// the platform, so it is a usage error rather than a request the API rejects.
-#[test]
-fn the_role_flag_rejects_a_role_that_does_not_exist() {
+fn roles_list_is_read_from_the_platform_and_needs_a_session() {
     let home = TempHome::new();
 
     selfhost(&home)
-        .args([
+        .args(["profile", "set", "default", "org", "org_a1"])
+        .assert()
+        .success();
+
+    selfhost(&home)
+        .args(["org", "roles", "list"])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("selfhost auth login"));
+}
+
+/// `--role` takes any slug: a role this CLI has never shipped reaches the
+/// platform instead of stopping at a usage error.
+#[test]
+fn the_role_flag_accepts_a_role_the_cli_has_never_shipped() {
+    let home = TempHome::new();
+
+    for command in [
+        vec![
             "org",
             "members",
             "add",
             "dana@example.com",
             "--role",
-            "viewer",
-        ])
-        .assert()
-        .code(2)
-        .stderr(predicate::str::contains("viewer"));
+            "support_engineer",
+        ],
+        vec![
+            "org",
+            "invites",
+            "create",
+            "dana@example.com",
+            "--role",
+            "data_viewer",
+        ],
+        vec![
+            "org",
+            "members",
+            "update-role",
+            "dana@example.com",
+            "--role",
+            "editor",
+        ],
+    ] {
+        selfhost(&home)
+            .args(&command)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(NO_ORGANIZATION))
+            .stderr(predicate::str::contains("invalid value").not());
+    }
 
     // Required where the verb changes an existing member's role...
     selfhost(&home)
