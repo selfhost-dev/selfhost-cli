@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download selfhost</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      max-width: 44rem;
+      margin: 4rem auto;
+      padding: 0 1.25rem;
+      font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+    a.button {
+      display: inline-block;
+      margin: 1.25rem 0 0;
+      padding: 0.7rem 1.2rem;
+      border-radius: 6px;
+      background: #1769aa;
+      color: #fff;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    a.button:hover { background: #115487; }
+    pre {
+      overflow-x: auto;
+      padding: 0.9rem 1rem;
+      border-radius: 6px;
+      background: #f2f4f7;
+      color: #17212e;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    footer { margin-top: 3rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Download selfhost</h1>
+    <p>One command-line tool to manage databases, projects and deployments on selfhost.dev.</p>
+
+    <a class="button" href="https://github.com/selfhost-dev/selfhost-cli/releases/latest">
+      Download selfhost
+    </a>
+
+    <h2>Or install with a command</h2>
+    <p>macOS and Linux:</p>
+    <pre><code>curl -fsSL https://cli.selfhost.dev/install.sh | sh</code></pre>
+    <p>Windows, in PowerShell:</p>
+    <pre><code>irm https://cli.selfhost.dev/install.ps1 | iex</code></pre>
+    <p>Both installers check a published SHA-256 before they write the binary.</p>
+
+    <h2>Uninstall</h2>
+    <p>Delete the binary. On Windows, also remove the install directory from your user PATH.</p>
+  </main>
+
+  <footer>
+    By downloading or using selfhost you agree to our
+    <a href="https://selfhost.dev/terms-conditions/">Terms of Service</a>.
+  </footer>
+</body>
+</html>

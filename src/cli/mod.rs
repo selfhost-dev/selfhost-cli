@@ -1240,6 +1240,9 @@ fn help_trailer(command: &clap::Command) -> String {
          Run selfhost with no arguments to open the interactive terminal UI\n  \
          (same as selfhost tui). Set SELFHOSTDEV_NO_TUI=1 to print help instead.",
     );
+    // The download policy asks the software itself, not just the download
+    // page, to carry a link to the terms. Root help reaches every user.
+    trailer.push_str("\n\nTerms of service: https://selfhost.dev/terms-conditions/");
     trailer
 }
 

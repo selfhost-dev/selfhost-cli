@@ -6,6 +6,7 @@ CloudFormation stack; the release workflow uploads on a tag push).
 
 | File | Purpose |
 |---|---|
+| `index.html` | Download page, linked to the Terms of Service |
 | `install.sh` | POSIX sh installer for Linux and macOS (`curl -fsSL https://cli.selfhost.dev/install.sh \| sh`) |
 | `install.ps1` | PowerShell installer for Windows (`irm https://cli.selfhost.dev/install.ps1 \| iex`) |
 | `install.cmd` | cmd.exe/double-click shim that runs `install.ps1` |
@@ -31,6 +32,10 @@ Breaking either rule makes the 5-minute TTL unsafe. Don't.
   for that name issued in us-east-1, viewer protocol `redirect-to-https`, and
   the managed **CachingOptimized** policy — which honours the origin's
   `Cache-Control`, so the TTLs above survive. CloudFront access logging is off.
+  Its **default root object** is `index.html`, so `https://cli.selfhost.dev/`
+  serves the download page. If that setting is ever lost, set it in the
+  distribution settings again — a one-time CDN change, not something a release
+  does.
 - **DNS** — a `cli` CNAME in Cloudflare, **DNS only** (grey cloud), pointing at
   the distribution domain. Proxying it would put Cloudflare in front of
   CloudFront and break the origin pin below.
@@ -60,6 +65,10 @@ does the rest.
   manifest cannot drift from the binaries, and flips the installers with it —
   then invalidates `/latest.json`, `/install.sh`, `/install.ps1` and
   `/install.cmd`, so the flip is immediate instead of up to five minutes late.
+- It publishes the static download page at `/index.html` with the same
+  five-minute TTL and invalidates it, then checks through the CDN that the page
+  still links to the Terms of Service. The page has no version in it, so a
+  pre-release publishes it too.
 - A pre-release version (`0.2.0-rc1` and the like) publishes its binaries but
   leaves the manifest pointing at the stable release.
 

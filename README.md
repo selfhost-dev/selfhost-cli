@@ -6,6 +6,8 @@ This project is young. The whole command tree is registered and every command ha
 
 ## Install
 
+The download page is [cli.selfhost.dev](https://cli.selfhost.dev/). By downloading or using selfhost you agree to our [Terms of Service](https://selfhost.dev/terms-conditions/).
+
 ### macOS and Linux
 
 ```sh
