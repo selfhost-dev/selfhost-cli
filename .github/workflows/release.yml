@@ -680,6 +680,21 @@ jobs:
             --cache-control "public, max-age=300"
           echo "distribution published for v${VERSION}"
 
+      - name: Publish the download page
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The page is static and has no version in it, so a pre-release does
+          # not skip it. The five-minute TTL matches the other mutable pointers.
+          aws s3 cp distribution/index.html "s3://${DISTRIBUTION_BUCKET}/index.html" \
+            --content-type "text/html; charset=utf-8" \
+            --cache-control "public, max-age=300"
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths /index.html /
+          # The distribution's default root object is index.html, so the bare
+          # root serves this file too; see distribution/README.md.
+
       - name: Check the CDN serves what was uploaded
         shell: bash
         env:
@@ -708,6 +723,16 @@ jobs:
             fi
           done
           echo "all six binaries are downloadable through the CDN at the expected size"
+
+          # The download page must carry the terms link: that is the "must"
+          # half of the distribution policy, and a slipped link would ship a
+          # page without it unnoticed.
+          page="$(curl -fsSL --retry 3 https://cli.selfhost.dev/index.html)"
+          case "$page" in
+            *"https://selfhost.dev/terms-conditions/"*) ;;
+            *) echo "::error::the download page does not link to the terms of service"; exit 1 ;;
+          esac
+          echo "the download page links to the terms of service"
 
       - name: Invalidate the mutable pointers
         shell: bash

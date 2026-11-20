@@ -383,6 +383,16 @@ fn help_lists_every_top_level_group() {
     }
 }
 
+/// The root help tells people where the terms that govern the CLI live.
+#[test]
+fn root_help_links_to_terms_of_service() {
+    let stdout = help_of("");
+    assert!(
+        stdout.contains("https://selfhost.dev/terms-conditions/"),
+        "root help does not link to the terms of service:\n{stdout}"
+    );
+}
+
 #[test]
 fn tree_prints_the_command_tree() {
     selfhost()
