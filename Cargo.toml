@@ -36,7 +36,7 @@ tokio = { version = "1.53.1", features = [
 ] }
 semver = "1.0.28"
 sha2 = "0.10.9"
-zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.2"
